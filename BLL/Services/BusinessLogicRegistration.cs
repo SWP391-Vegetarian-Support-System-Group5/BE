@@ -1,0 +1,28 @@
+using DAL.Repositories;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace BLL.Services;
+
+public static class BusinessLogicRegistration
+{
+    public static IServiceCollection AddVegetarianBusinessLogic(this IServiceCollection services)
+    {
+        services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+        services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IUserAdministrationService, UserAdministrationService>();
+        services.AddScoped<IUserAllergenService, UserAllergenService>();
+        services.AddScoped<IReferenceDataAndRestaurantService, ReferenceDataAndRestaurantService>();
+        services.AddScoped<IPostService, PostService>();
+        services.AddScoped<IRecipeService, RecipeService>();
+        services.AddScoped<IMealPlanService, MealPlanService>();
+        services.AddScoped<IChatService, ChatService>();
+        services.AddScoped<IModerationService, ModerationService>();
+        services.AddScoped<ISeedService, SeedService>();
+        services.AddScoped<IHealthService, HealthService>();
+        services.AddSingleton<IAiChatService, MockAiChatService>();
+        services.AddSingleton<IIngredientRecognitionService, MockIngredientRecognitionService>();
+        services.AddSingleton<IVideoRecipeSummaryService, MockVideoRecipeSummaryService>();
+        services.AddSingleton<IModerationAiService, MockModerationAiService>();
+        return services;
+    }
+}
