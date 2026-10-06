@@ -25,6 +25,8 @@ public record DietTypeRequest([Required, MaxLength(100)] string Name);
 public record AllergenRequest([Required, MaxLength(150)] string Name);
 public record TagRequest([Required, MaxLength(100)] string Name);
 public record CatalogItemResponse(int Id, string Name, string? Type = null);
+public record ProvinceResponse(string Code, string Name, string Type, decimal Latitude, decimal Longitude);
+public record AreaResponse(string Code, string Name, string Type, decimal Latitude, decimal Longitude);
 public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, List<string>? Foods);
 public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, IReadOnlyCollection<string> Foods);
 public record RestaurantReviewRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Range(1, 5)] int Rating);

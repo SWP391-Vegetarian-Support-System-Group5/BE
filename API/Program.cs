@@ -62,6 +62,7 @@ builder.Services.AddSwaggerGen(options =>
             "Reports" => "Moderation",
             "Administration" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
+            "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
             _ => "Other"
         };

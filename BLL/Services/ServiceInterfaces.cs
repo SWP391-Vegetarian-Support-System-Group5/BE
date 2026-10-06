@@ -51,6 +51,12 @@ public interface IReferenceDataAndRestaurantService
     Task<IReadOnlyCollection<RestaurantReviewResponse>> GetRestaurantReviewsAsync(int restaurantId, CancellationToken cancellationToken = default);
 }
 
+public interface ILocationService
+{
+    IReadOnlyCollection<ProvinceResponse> GetProvinces();
+    IReadOnlyCollection<AreaResponse>? GetAreas(string provinceCode);
+}
+
 public interface IPostService
 {
     Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default);

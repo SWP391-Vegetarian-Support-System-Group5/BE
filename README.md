@@ -79,6 +79,7 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 - Posts: `/api/posts`, comments, ratings and bookmarks
 - Recipes: `POST /api/recipes`, `GET /api/recipes/{id}`, `GET /api/recipes/search`
 - Restaurants: `/api/restaurants`, `/nearby`, `/search`, reviews
+- Locations: `GET /api/locations/provinces`, `GET /api/locations/provinces/{provinceCode}/areas`
 - Meal planner: `POST /api/meal-plans/generate`, `GET /api/meal-plans`
 - Chat and AI mocks: `/api/chat`, `/api/ai/ingredient-recognition`, `/api/ai/video-summary`
 - Moderation: `/api/reports/*`, `/api/admin/moderation/*`
