@@ -25,6 +25,9 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<MealPlanMeal> MealPlanMeals => Set<MealPlanMeal>();
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<VideoRecipeDraft> VideoRecipeDrafts => Set<VideoRecipeDraft>();
+    public DbSet<VideoRecipeDraftIngredient> VideoRecipeDraftIngredients => Set<VideoRecipeDraftIngredient>();
+    public DbSet<VideoRecipeDraftStep> VideoRecipeDraftSteps => Set<VideoRecipeDraftStep>();
     public DbSet<ModerationFlag> ModerationFlags => Set<ModerationFlag>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<PostTag> PostTags => Set<PostTag>();
@@ -51,8 +54,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Role).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);
-            entity.Property(x => x.ActivityLevel).HasMaxLength(30).IsUnicode(false);
-            entity.Property(x => x.HealthGoal).HasMaxLength(30).IsUnicode(false);
             entity.Property(x => x.HeightCm).HasPrecision(5, 2);
             entity.Property(x => x.WeightKg).HasPrecision(6, 2);
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
@@ -162,10 +163,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.ToTable("Recipes");
             entity.HasKey(x => x.PostId);
             entity.Property(x => x.Servings).HasPrecision(5, 2);
-            entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.ProteinPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.CarbsPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.FatPerServing).HasPrecision(8, 2);
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
             entity.HasOne(x => x.Post).WithOne(x => x.Recipe).HasForeignKey<Recipe>(x => x.PostId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -176,6 +173,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.RecipeIngredientId);
             entity.Property(x => x.IngredientName).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Amount).HasMaxLength(100);
+            entity.Property(x => x.DietaryGroup).HasMaxLength(30).IsUnicode(false).IsRequired().HasDefaultValue("UNVERIFIED");
             entity.HasOne(x => x.Recipe).WithMany(x => x.Ingredients).HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Allergen).WithMany(x => x.RecipeIngredients).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -236,11 +234,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.ToTable("MealPlans");
             entity.HasKey(x => x.MealPlanId);
             entity.Property(x => x.StartDate).HasColumnType("date");
-            entity.Property(x => x.HealthGoal).HasMaxLength(30).IsUnicode(false);
-            entity.Property(x => x.BMI).HasPrecision(5, 2);
-            entity.Property(x => x.BMR).HasPrecision(8, 2);
-            entity.Property(x => x.TDEE).HasPrecision(8, 2);
-            entity.Property(x => x.TargetCaloriesPerDay).HasPrecision(8, 2);
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -249,7 +242,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.ToTable("MealPlanMeals");
             entity.HasKey(x => x.MealPlanMealId);
             entity.Property(x => x.MealType).HasMaxLength(20).IsUnicode(false).IsRequired();
-            entity.Property(x => x.PlannedCalories).HasPrecision(8, 2);
             entity.HasOne(x => x.MealPlan).WithMany(x => x.Meals).HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Recipe).WithMany().HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -261,6 +253,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         {
             entity.ToTable("ChatSessions");
             entity.HasKey(x => x.ChatSessionId);
+            entity.Property(x => x.GuestAccessTokenHash).HasMaxLength(64).IsUnicode(false);
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -270,7 +264,41 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.ChatMessageId);
             entity.Property(x => x.Sender).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.Content).IsRequired();
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
             entity.HasOne(x => x.ChatSession).WithMany(x => x.Messages).HasForeignKey(x => x.ChatSessionId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<VideoRecipeDraft>(entity =>
+        {
+            entity.ToTable("VideoRecipeDrafts");
+            entity.HasKey(x => x.VideoRecipeDraftId);
+            entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false).IsRequired();
+            entity.Property(x => x.GeminiFileName).HasMaxLength(200).IsUnicode(false);
+            entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Title).HasMaxLength(250);
+            entity.Property(x => x.ErrorMessage).HasMaxLength(1000);
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
+            entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<VideoRecipeDraftIngredient>(entity =>
+        {
+            entity.ToTable("VideoRecipeDraftIngredients");
+            entity.HasKey(x => x.VideoRecipeDraftIngredientId);
+            entity.Property(x => x.IngredientName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Amount).HasMaxLength(100);
+            entity.Property(x => x.DietaryGroup).HasMaxLength(30).IsUnicode(false).IsRequired();
+            entity.HasOne(x => x.Draft).WithMany(x => x.Ingredients).HasForeignKey(x => x.VideoRecipeDraftId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<VideoRecipeDraftStep>(entity =>
+        {
+            entity.ToTable("VideoRecipeDraftSteps");
+            entity.HasKey(x => x.VideoRecipeDraftStepId);
+            entity.Property(x => x.Instruction).IsRequired();
+            entity.HasIndex(x => new { x.VideoRecipeDraftId, x.StepNumber }).IsUnique();
+            entity.HasOne(x => x.Draft).WithMany(x => x.Steps).HasForeignKey(x => x.VideoRecipeDraftId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<ModerationFlag>(entity =>

@@ -11,10 +11,10 @@ namespace API.Controllers;
 public class AuthenticationController(IAuthService authService, IJwtTokenService tokenService) : ControllerBase
 {
     [HttpPost("register")]
-    public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<UserResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
         var user = await authService.RegisterAsync(request, cancellationToken);
-        return Created("/api/users/me", new AuthResponse(tokenService.Create(user), user));
+        return Created($"/api/users/{user.UserId}", user);
     }
 
     [HttpPost("login")]

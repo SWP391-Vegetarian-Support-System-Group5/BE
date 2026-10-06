@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace API.Infrastructure;
 
-public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMiddleware> logger)
+public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMiddleware> logger, IWebHostEnvironment environment)
 {
     public async Task Invoke(HttpContext context)
     {
@@ -16,7 +16,8 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
         catch (Exception exception)
         {
             logger.LogError(exception, "Unhandled API error.");
-            await WriteAsync(context, StatusCodes.Status500InternalServerError, "An unexpected server error occurred.", []);
+            var errors = environment.IsDevelopment() ? [exception.GetBaseException().Message] : Array.Empty<string>();
+            await WriteAsync(context, StatusCodes.Status500InternalServerError, "An unexpected server error occurred.", errors);
         }
     }
 

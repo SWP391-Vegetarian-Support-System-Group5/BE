@@ -10,7 +10,7 @@ namespace API.Controllers;
 [Route("api")]
 public class ReferenceDataController(IReferenceDataAndRestaurantService referenceDataService) : ControllerBase
 {
-    [HttpGet("diet-types")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetDietTypes(CancellationToken ct) => referenceDataService.GetDietTypesAsync(ct);
+    [HttpGet("diet-types")] public Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypes(CancellationToken ct) => referenceDataService.GetDietTypesAsync(ct);
     [HttpGet("categories")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetCategories(CancellationToken ct) => referenceDataService.GetCategoriesAsync(ct);
     [HttpGet("allergens")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergens(CancellationToken ct) => referenceDataService.GetAllergensAsync(ct);
     [HttpGet("tags")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetTags(CancellationToken ct) => referenceDataService.GetTagsAsync(ct);

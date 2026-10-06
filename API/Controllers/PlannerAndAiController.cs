@@ -24,14 +24,14 @@ public class ChatController(IChatService chatService) : ControllerBase
     [HttpPost("sessions")] public async Task<ActionResult<ChatSessionResponse>> Create(CancellationToken ct) { var session = await chatService.CreateSessionAsync(User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, ct); return Created($"/api/chat/sessions/{session.ChatSessionId}", session); }
     [Authorize]
     [HttpGet("sessions")] public Task<IReadOnlyCollection<ChatSessionResponse>> Get(CancellationToken ct) => chatService.GetSessionsAsync(User.GetRequiredUserId(), ct);
-    [HttpGet("sessions/{id:int}")] public Task<ChatSessionResponse> GetById(int id, CancellationToken ct) => chatService.GetSessionAsync(id, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null, ct);
-    [HttpPost("sessions/{id:int}/messages")] public Task<ChatMessageResponse> Send(int id, ChatMessageRequest request, CancellationToken ct) => chatService.SendAsync(id, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null, request, ct);
+    [HttpGet("sessions/{id:int}")] public Task<ChatSessionResponse> GetById(int id, [FromHeader(Name = "X-Guest-Chat-Token")] string? guestAccessToken, CancellationToken ct) => chatService.GetSessionAsync(id, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null, guestAccessToken, ct);
+    [HttpPost("sessions/{id:int}/messages")] public Task<ChatReplyResponse> Send(int id, ChatMessageRequest request, [FromHeader(Name = "X-Guest-Chat-Token")] string? guestAccessToken, CancellationToken ct) => chatService.SendAsync(id, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null, guestAccessToken, request, ct);
 }
 
 [ApiController]
 [Authorize]
 [Route("api/ai")]
-public class AiFeaturesController(IIngredientRecognitionService ingredientRecognitionService, IVideoRecipeSummaryService videoSummaryService) : ControllerBase
+public class AiFeaturesController(IIngredientRecognitionService ingredientRecognitionService) : ControllerBase
 {
     [HttpPost("ingredient-recognition")]
     public async Task<ActionResult<IReadOnlyCollection<IngredientRecognitionResponse>>> Recognize(IFormFile image, CancellationToken ct)
@@ -40,5 +40,4 @@ public class AiFeaturesController(IIngredientRecognitionService ingredientRecogn
         await using var stream = image.OpenReadStream();
         return Ok(await ingredientRecognitionService.RecognizeAsync(stream, image.FileName, ct));
     }
-    [HttpPost("video-summary")] public Task<VideoSummaryResponse> VideoSummary(VideoSummaryRequest request, CancellationToken ct) => videoSummaryService.SummarizeAsync(request.VideoUrl, ct);
 }
