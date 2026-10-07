@@ -15,14 +15,14 @@ public class ReferenceDataAndRestaurantService(
     IRepository<RestaurantFood> restaurantFoods,
     IRepository<Post> posts,
     IRepository<RestaurantReview> restaurantReviews,
-    IRepository<User> users,
-    IRepository<RecipeDietCompatibility> recipeDietCompatibilities,
     IRepository<UserAllergen> userAllergens,
     IRepository<RecipeIngredient> recipeIngredients,
     IRepository<PostTag> postTags) : IReferenceDataAndRestaurantService
 {
-    public async Task<IReadOnlyCollection<CatalogItemResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
-        await dietTypes.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.DietTypeId, x.Name, null)).ToListAsync(cancellationToken);
+    public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
+        (await dietTypes.Query().OrderBy(x => x.Name).ToListAsync(cancellationToken))
+            .Select(x => new DietTypeResponse(x.DietTypeId, x.Name, VegetarianDietRules.GetAllowedGroups(x.Name), VegetarianDietRules.ProhibitedNonVegetarianGroups.Concat(VegetarianDietRules.SupportedIngredientGroups.Except(VegetarianDietRules.GetAllowedGroups(x.Name))).ToArray()))
+            .ToList();
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetCategoriesAsync(CancellationToken cancellationToken = default) =>
         await categories.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.CategoryId, x.Name, x.Type)).ToListAsync(cancellationToken);
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default) =>
@@ -30,13 +30,6 @@ public class ReferenceDataAndRestaurantService(
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetTagsAsync(CancellationToken cancellationToken = default) =>
         await tags.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.TagId, x.Name, null)).ToListAsync(cancellationToken);
 
-    public async Task<CatalogItemResponse> CreateDietTypeAsync(DietTypeRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = new DietType { Name = request.Name.Trim().ToUpperInvariant() };
-        await EnsureUniqueAsync(dietTypes.Query(), entity.Name, x => x.Name, cancellationToken);
-        await dietTypes.AddAsync(entity, cancellationToken); await dietTypes.SaveChangesAsync(cancellationToken);
-        return new(entity.DietTypeId, entity.Name);
-    }
     public async Task<CatalogItemResponse> CreateCategoryAsync(CategoryRequest request, CancellationToken cancellationToken = default)
     {
         var entity = new Category { Name = request.Name.Trim(), Type = FixedValues.CategoryType(request.Type) };
@@ -58,12 +51,6 @@ public class ReferenceDataAndRestaurantService(
         return new(entity.TagId, entity.Name);
     }
 
-    public async Task UpdateDietTypeAsync(int id, DietTypeRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = await RequireAsync(dietTypes, id, cancellationToken); var name = request.Name.Trim().ToUpperInvariant();
-        if (!string.Equals(entity.Name, name, StringComparison.OrdinalIgnoreCase)) await EnsureUniqueAsync(dietTypes.Query().Where(x => x.DietTypeId != id), name, x => x.Name, cancellationToken);
-        entity.Name = name; await dietTypes.SaveChangesAsync(cancellationToken);
-    }
     public async Task UpdateCategoryAsync(int id, CategoryRequest request, CancellationToken cancellationToken = default)
     {
         var entity = await RequireAsync(categories, id, cancellationToken); entity.Name = request.Name.Trim(); entity.Type = FixedValues.CategoryType(request.Type); await categories.SaveChangesAsync(cancellationToken);
@@ -81,12 +68,6 @@ public class ReferenceDataAndRestaurantService(
         entity.Name = name; await tags.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task DeleteDietTypeAsync(int id, CancellationToken cancellationToken = default)
-    {
-        await RequireAsync(dietTypes, id, cancellationToken);
-        if (await users.Query().AnyAsync(x => x.DietTypeId == id, cancellationToken) || await restaurants.Query().AnyAsync(x => x.DietTypeId == id, cancellationToken) || await recipeDietCompatibilities.Query().AnyAsync(x => x.DietTypeId == id, cancellationToken)) throw new ServiceException("Diet type is in use and cannot be deleted.", 409);
-        await DeleteAsync(dietTypes, id, cancellationToken);
-    }
     public async Task DeleteCategoryAsync(int id, CancellationToken cancellationToken = default)
     {
         await RequireAsync(categories, id, cancellationToken);

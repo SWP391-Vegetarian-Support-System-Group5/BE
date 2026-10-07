@@ -6,7 +6,7 @@ Backend MUST-HAVE cho hệ thống hỗ trợ người ăn chay. API cung cấp 
 
 ```text
 API (controllers, JWT, Swagger, middleware)
-    -> BLL (business services, validation, meal calculation, AI abstractions)
+    -> BLL (business services, validation, meal selection, AI abstractions)
         -> DAL (EF Core entities, DbContext, repositories)
             -> SQL Server
 ```
@@ -25,13 +25,13 @@ API (controllers, JWT, Swagger, middleware)
 
 ```text
 API/    Presentation layer, controllers, middleware, JWT configuration
-BLL/    DTOs, services, business rules, AI mock implementations
+BLL/    DTOs, services, business rules, nutrition chatbot and RAG services
 DAL/    23 entity mappings, VegetarianDbContext, repositories
 ```
 
 ## Database
 
-The application maps the existing `VegetarianSupportSystemDB` schema. It does not create migrations, drop the database, reset data, or alter the schema.
+The application maps the existing `VegetarianSupportSystemDB` schema. On startup, EF Core automatically applies pending migrations before seed data is checked. The migrations remove discontinued nutrition-calculation fields, secure guest chat sessions, and add the RAG Vector Store configuration table.
 
 Development connection is configured in `API/appsettings.Development.json` for the local SQL Express instance:
 
@@ -81,10 +81,23 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 - Restaurants: `/api/restaurants`, `/nearby`, `/search`, reviews
 - Locations: `GET /api/locations/provinces`, `GET /api/locations/provinces/{provinceCode}/areas`
 - Meal planner: `POST /api/meal-plans/generate`, `GET /api/meal-plans`
-- Chat and AI mocks: `/api/chat`, `/api/ai/ingredient-recognition`, `/api/ai/video-summary`
+- Nutrition chatbot: `/api/chat`; Gemini Free Tier with local RAG from `KnowledgeBase/`; guest sessions use the `X-Guest-Chat-Token` header
+- Other AI features currently remain mock implementations: `/api/ai/ingredient-recognition`, `/api/ai/video-summary`
 - Moderation: `/api/reports/*`, `/api/admin/moderation/*`
 - Admin: users, content moderation, categories, diet types, allergens, restaurants
 
 ## Verification
 
 The API was verified against the existing SQL Server database with health checks, JWT login, Swagger, posts, comments, ratings, bookmarks, recipe search, restaurant search, moderation, guest chat, and a 28-meal plan generated for seven days.
+
+## Enable the real nutrition chatbot
+
+1. Create a Gemini API key in Google AI Studio. Do not put the key in Git or send it in chat.
+2. Set the key locally:
+
+```powershell
+dotnet user-secrets set "Gemini:ApiKey" "YOUR_GEMINI_API_KEY" --project API/API.csproj
+```
+
+3. Run the API. It reads Markdown files in `KnowledgeBase/` locally and retrieves relevant passages before calling Gemini.
+4. Create a chat session and send messages through `/api/chat/sessions/{id}/messages`.

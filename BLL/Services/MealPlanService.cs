@@ -6,12 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BLL.Services;
 
-public static class NutritionCalculationSettings
-{
-    public const decimal WeightLossCalorieDeficit = 500m;
-    public const decimal MuscleGainCalorieSurplus = 300m;
-}
-
 public class MealPlanService(
     IRepository<User> users,
     IRepository<Recipe> recipes,
@@ -21,11 +15,6 @@ public class MealPlanService(
     public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken cancellationToken = default)
     {
         var user = await users.Query().Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new ServiceException("User was not found.", 404);
-        ValidateNutritionProfile(user);
-        var bmi = Math.Round(user.WeightKg!.Value / ((user.HeightCm!.Value / 100m) * (user.HeightCm.Value / 100m)), 2);
-        var bmr = CalculateBmr(user);
-        var tdee = Math.Round(bmr * ActivityFactor(user.ActivityLevel!), 2);
-        var targetCalories = CalculateTargetCalories(tdee, user.HealthGoal!);
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
         var candidates = await recipes.Query()
             .Include(x => x.Post)
@@ -34,22 +23,23 @@ public class MealPlanService(
             .Where(x => x.Post.Status == "PUBLISHED")
             .ToListAsync(cancellationToken);
         candidates = candidates
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
             .Where(x => !user.DietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == user.DietTypeId && d.IsCompatible))
             .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
             .ToList();
         if (candidates.Count == 0) throw new ServiceException("No recipe matches the user's diet type and allergens.", 400);
 
         var availableIngredients = ParseIngredients(request.AvailableIngredients);
-        var plan = new MealPlan { UserId = userId, StartDate = (request.StartDate ?? DateTime.UtcNow.Date).Date, HealthGoal = user.HealthGoal, AvailableIngredients = request.AvailableIngredients?.Trim(), BMI = bmi, BMR = bmr, TDEE = tdee, TargetCaloriesPerDay = targetCalories };
+        var plan = new MealPlan { UserId = userId, StartDate = (request.StartDate ?? DateTime.UtcNow.Date).Date, AvailableIngredients = request.AvailableIngredients?.Trim() };
         await mealPlans.AddAsync(plan, cancellationToken); await mealPlans.SaveChangesAsync(cancellationToken);
 
-        var allocations = new[] { ("BREAKFAST", 0.25m), ("LUNCH", 0.35m), ("DINNER", 0.30m), ("SNACK", 0.10m) };
+        var mealTypes = new[] { "BREAKFAST", "LUNCH", "DINNER", "SNACK" };
         for (var day = 1; day <= 7; day++)
         {
-            foreach (var (mealType, share) in allocations)
+            for (var mealIndex = 0; mealIndex < mealTypes.Length; mealIndex++)
             {
-                var selected = SelectRecipe(candidates, targetCalories * share, availableIngredients, day);
-                await mealPlanMeals.AddAsync(new MealPlanMeal { MealPlanId = plan.MealPlanId, DayNumber = day, MealType = mealType, RecipeId = selected.PostId, PlannedCalories = selected.CaloriesPerServing ?? 0m }, cancellationToken);
+                var selected = SelectRecipe(candidates, availableIngredients, day, mealIndex);
+                await mealPlanMeals.AddAsync(new MealPlanMeal { MealPlanId = plan.MealPlanId, DayNumber = day, MealType = mealTypes[mealIndex], RecipeId = selected.PostId }, cancellationToken);
             }
         }
         await mealPlanMeals.SaveChangesAsync(cancellationToken);
@@ -78,18 +68,7 @@ public class MealPlanService(
     }
 
     private IQueryable<MealPlan> BaseQuery() => mealPlans.Query().Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.Post);
-    private static MealPlanResponse ToResponse(MealPlan x) => new(x.MealPlanId, x.StartDate, x.HealthGoal, x.BMI, x.BMR, x.TDEE, x.TargetCaloriesPerDay, x.Meals.OrderBy(m => m.DayNumber).ThenBy(m => m.MealType).Select(m => new MealPlanMealResponse(m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title, m.PlannedCalories)).ToList());
-    private static void ValidateNutritionProfile(User user)
-    {
-        if (user.Age is null or <= 0 || user.HeightCm is null or <= 0 || user.WeightKg is null or <= 0 || string.IsNullOrWhiteSpace(user.Sex) || string.IsNullOrWhiteSpace(user.ActivityLevel) || string.IsNullOrWhiteSpace(user.HealthGoal)) throw new ServiceException("Age, sex, height, weight, activity level, and health goal are required to generate a meal plan.");
-    }
-    private static decimal CalculateBmr(User user)
-    {
-        var baseValue = 10m * user.WeightKg!.Value + 6.25m * user.HeightCm!.Value - 5m * user.Age!.Value;
-        return Math.Round(baseValue + (user.Sex!.Equals("MALE", StringComparison.OrdinalIgnoreCase) || user.Sex.Equals("M", StringComparison.OrdinalIgnoreCase) ? 5m : -161m), 2);
-    }
-    private static decimal ActivityFactor(string activityLevel) => FixedValues.ActivityFactor(activityLevel);
-    private static decimal CalculateTargetCalories(decimal tdee, string goal) => Math.Round(FixedValues.HealthGoal(goal) switch { "WEIGHT_LOSS" => tdee - NutritionCalculationSettings.WeightLossCalorieDeficit, "MAINTENANCE" => tdee, "MUSCLE_GAIN" => tdee + NutritionCalculationSettings.MuscleGainCalorieSurplus, _ => throw new InvalidOperationException("Health goal validation failed.") }, 2);
+    private static MealPlanResponse ToResponse(MealPlan x) => new(x.MealPlanId, x.StartDate, x.Meals.OrderBy(m => m.DayNumber).ThenBy(m => m.MealType).Select(m => new MealPlanMealResponse(m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title)).ToList());
     private static HashSet<string> ParseIngredients(string? value) => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.ToLowerInvariant()).ToHashSet();
-    private static Recipe SelectRecipe(IReadOnlyCollection<Recipe> candidates, decimal desiredCalories, IReadOnlySet<string> availableIngredients, int day) => candidates.OrderByDescending(x => x.Ingredients.Count(i => availableIngredients.Contains(i.IngredientName.ToLowerInvariant()))).ThenBy(x => Math.Abs((x.CaloriesPerServing ?? 0m) - desiredCalories)).ThenBy(x => Math.Abs((x.PostId % candidates.Count) - (day % candidates.Count))).First();
+    private static Recipe SelectRecipe(IReadOnlyCollection<Recipe> candidates, IReadOnlySet<string> availableIngredients, int day, int mealIndex) => candidates.OrderByDescending(x => x.Ingredients.Count(i => availableIngredients.Contains(i.IngredientName.ToLowerInvariant()))).ThenBy(x => (x.PostId + day + mealIndex) % candidates.Count).First();
 }

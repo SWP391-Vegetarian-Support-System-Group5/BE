@@ -18,8 +18,6 @@ public class AuthService(IRepository<User> users, IRepository<DietType> dietType
             throw new ServiceException("Diet type was not found.", 404);
 
         var sex = FixedValues.Sex(request.Sex);
-        var activityLevel = FixedValues.ActivityLevel(request.ActivityLevel);
-        var healthGoal = FixedValues.HealthGoal(request.HealthGoal);
 
         var now = DateTime.UtcNow;
         var user = new User
@@ -28,12 +26,9 @@ public class AuthService(IRepository<User> users, IRepository<DietType> dietType
             PasswordHash = PasswordHasher.Hash(request.Password),
             Role = "USER",
             FullName = request.FullName.Trim(),
-            Age = request.Age,
             Sex = sex,
             HeightCm = request.HeightCm,
             WeightKg = request.WeightKg,
-            ActivityLevel = activityLevel,
-            HealthGoal = healthGoal,
             DietTypeId = request.DietTypeId,
             CreatedAt = now,
             UpdatedAt = now,
@@ -61,7 +56,7 @@ public class AuthService(IRepository<User> users, IRepository<DietType> dietType
         return user is null ? null : ToResponse(user);
     }
 
-    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.FullName, user.Age, user.Sex, user.HeightCm, user.WeightKg, user.ActivityLevel, user.HealthGoal, user.DietTypeId, user.IsActive);
+    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.FullName, user.Sex, user.HeightCm, user.WeightKg, user.DietTypeId, user.IsActive);
 }
 
 public static class PasswordHasher

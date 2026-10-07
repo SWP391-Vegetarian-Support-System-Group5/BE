@@ -5,18 +5,40 @@ using BLL.Services;
 using DAL.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
+
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadSize;
+});
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = maxUploadSize;
+});
 var connectionString = builder.Configuration.GetConnectionString("VegetarianSupportDatabase") ?? throw new InvalidOperationException("Database connection string is not configured.");
 var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOperationException("JWT signing key is not configured or is too short.");
 
 builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddVegetarianBusinessLogic();
+var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
+builder.Services.AddSingleton(geminiSettings);
+builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));
+builder.Services.AddHttpClient("GeminiFiles", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/"));
+builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>()));
+builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"), "uploads", "videos") });
+builder.Services.AddSingleton<LocalVideoStorage>();
+builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>()));
+builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
+builder.Services.AddSingleton<IKnowledgeBaseService>(_ => new LocalKnowledgeBaseService(Path.Combine(AppContext.BaseDirectory, "KnowledgeBase")));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddControllers();
 builder.Services.Configure<ApiBehaviorOptions>(options => options.InvalidModelStateResponseFactory = context =>
@@ -58,7 +80,7 @@ builder.Services.AddSwaggerGen(options =>
             "Posts" or "Comments" => "Community",
             "Recipes" => "Recipes",
             "MealPlans" => "Meal Planner",
-            "Chat" or "AiFeatures" => "AI Assistant",
+            "Chat" or "AiFeatures" or "VideoRecipeDrafts" => "AI Assistant",
             "Reports" => "Moderation",
             "Administration" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
@@ -76,6 +98,7 @@ var app = builder.Build();
 app.UseMiddleware<ApiExceptionMiddleware>();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -83,7 +106,9 @@ app.MapControllers();
 
 using (var scope = app.Services.CreateScope())
 {
-    await scope.ServiceProvider.GetRequiredService<ISeedService>().SeedAsync();
+    var services = scope.ServiceProvider;
+    await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
+    await services.GetRequiredService<ISeedService>().SeedAsync();
 }
 
 app.Run();

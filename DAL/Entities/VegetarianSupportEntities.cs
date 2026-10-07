@@ -7,12 +7,9 @@ public class User
     public string PasswordHash { get; set; } = null!;
     public string Role { get; set; } = "USER";
     public string FullName { get; set; } = null!;
-    public int? Age { get; set; }
     public string? Sex { get; set; }
     public decimal? HeightCm { get; set; }
     public decimal? WeightKg { get; set; }
-    public string? ActivityLevel { get; set; }
-    public string? HealthGoal { get; set; }
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
@@ -99,10 +96,6 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
-    public decimal? CaloriesPerServing { get; set; }
-    public decimal? ProteinPerServing { get; set; }
-    public decimal? CarbsPerServing { get; set; }
-    public decimal? FatPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
@@ -116,6 +109,7 @@ public class RecipeIngredient
     public int RecipeId { get; set; }
     public string IngredientName { get; set; } = null!;
     public string? Amount { get; set; }
+    public string DietaryGroup { get; set; } = "UNVERIFIED";
     public int? AllergenId { get; set; }
     public Recipe Recipe { get; set; } = null!;
     public Allergen? Allergen { get; set; }
@@ -189,12 +183,7 @@ public class MealPlan
     public int MealPlanId { get; set; }
     public int UserId { get; set; }
     public DateTime StartDate { get; set; }
-    public string? HealthGoal { get; set; }
     public string? AvailableIngredients { get; set; }
-    public decimal? BMI { get; set; }
-    public decimal? BMR { get; set; }
-    public decimal? TDEE { get; set; }
-    public decimal? TargetCaloriesPerDay { get; set; }
     public User User { get; set; } = null!;
     public ICollection<MealPlanMeal> Meals { get; set; } = new List<MealPlanMeal>();
 }
@@ -206,7 +195,6 @@ public class MealPlanMeal
     public int DayNumber { get; set; }
     public string MealType { get; set; } = null!;
     public int RecipeId { get; set; }
-    public decimal? PlannedCalories { get; set; }
     public MealPlan MealPlan { get; set; } = null!;
     public Recipe Recipe { get; set; } = null!;
 }
@@ -215,6 +203,8 @@ public class ChatSession
 {
     public int ChatSessionId { get; set; }
     public int? UserId { get; set; }
+    public string? GuestAccessTokenHash { get; set; }
+    public DateTime CreatedAt { get; set; }
     public User? User { get; set; }
     public ICollection<ChatMessage> Messages { get; set; } = new List<ChatMessage>();
 }
@@ -225,7 +215,47 @@ public class ChatMessage
     public int ChatSessionId { get; set; }
     public string Sender { get; set; } = null!;
     public string Content { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
     public ChatSession ChatSession { get; set; } = null!;
+}
+
+public class VideoRecipeDraft
+{
+    public int VideoRecipeDraftId { get; set; }
+    public int UserId { get; set; }
+    public string VideoUrl { get; set; } = null!;
+    public string? GeminiFileName { get; set; }
+    public string Status { get; set; } = "PROCESSING";
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public string? Transcript { get; set; }
+    public int? EstimatedPrepMinutes { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public User User { get; set; } = null!;
+    public ICollection<VideoRecipeDraftIngredient> Ingredients { get; set; } = new List<VideoRecipeDraftIngredient>();
+    public ICollection<VideoRecipeDraftStep> Steps { get; set; } = new List<VideoRecipeDraftStep>();
+}
+
+public class VideoRecipeDraftIngredient
+{
+    public int VideoRecipeDraftIngredientId { get; set; }
+    public int VideoRecipeDraftId { get; set; }
+    public string IngredientName { get; set; } = null!;
+    public string? Amount { get; set; }
+    public string DietaryGroup { get; set; } = "PLANT";
+    public int? AllergenId { get; set; }
+    public VideoRecipeDraft Draft { get; set; } = null!;
+}
+
+public class VideoRecipeDraftStep
+{
+    public int VideoRecipeDraftStepId { get; set; }
+    public int VideoRecipeDraftId { get; set; }
+    public int StepNumber { get; set; }
+    public string Instruction { get; set; } = null!;
+    public VideoRecipeDraft Draft { get; set; } = null!;
 }
 
 public class ModerationFlag
