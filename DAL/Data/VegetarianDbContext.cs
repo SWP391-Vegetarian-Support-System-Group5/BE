@@ -6,6 +6,7 @@ namespace DAL.Data;
 public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<EmailOtpCode> EmailOtpCodes => Set<EmailOtpCode>();
     public DbSet<DietType> DietTypes => Set<DietType>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Post> Posts => Set<Post>();
@@ -60,7 +61,20 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
             entity.Property(x => x.CreatedAt).IsRequired();
             entity.Property(x => x.UpdatedAt).IsRequired();
+            entity.Property(x => x.IsEmailVerified).IsRequired().HasDefaultValue(true);
             entity.HasOne(x => x.DietType).WithMany(x => x.Users).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<EmailOtpCode>(entity =>
+        {
+            entity.ToTable("EmailOtpCodes");
+            entity.HasKey(x => x.EmailOtpCodeId);
+            entity.Property(x => x.Email).HasMaxLength(254).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Purpose).HasMaxLength(30).IsUnicode(false).IsRequired();
+            entity.Property(x => x.CodeHash).HasMaxLength(500).IsUnicode(false).IsRequired();
+            entity.Property(x => x.ExpiresAt).IsRequired();
+            entity.Property(x => x.CreatedAt).IsRequired();
+            entity.HasIndex(x => new { x.Email, x.Purpose, x.UsedAt });
         });
 
         modelBuilder.Entity<DietType>(entity =>

@@ -11,10 +11,35 @@ namespace API.Controllers;
 public class AuthenticationController(IAuthService authService, IJwtTokenService tokenService) : ControllerBase
 {
     [HttpPost("register")]
-    public async Task<ActionResult<UserResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<EmailOtpSentResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
-        var user = await authService.RegisterAsync(request, cancellationToken);
-        return Created($"/api/users/{user.UserId}", user);
+        var result = await authService.RegisterAsync(request, cancellationToken);
+        return Accepted(result);
+    }
+
+    [HttpPost("register/verify-otp")]
+    public async Task<ActionResult<ApiMessageResponse>> VerifyRegistrationOtp(VerifyEmailOtpRequest request, CancellationToken cancellationToken)
+    {
+        await authService.VerifyRegistrationOtpAsync(request, cancellationToken);
+        return Ok(new ApiMessageResponse("Email verified successfully. You can now log in."));
+    }
+
+    [HttpPost("register/resend-otp")]
+    public async Task<ActionResult<EmailOtpSentResponse>> ResendRegistrationOtp(RequestEmailOtpRequest request, CancellationToken cancellationToken) =>
+        Accepted(await authService.ResendRegistrationOtpAsync(request, cancellationToken));
+
+    [HttpPost("password/forgot")]
+    public async Task<ActionResult<EmailOtpSentResponse>> ForgotPassword(RequestEmailOtpRequest request, CancellationToken cancellationToken)
+    {
+        await authService.RequestPasswordResetAsync(request, cancellationToken);
+        return Accepted(new EmailOtpSentResponse(request.Email.Trim().ToLowerInvariant(), "If the email address exists, a password reset code has been sent.", 600));
+    }
+
+    [HttpPost("password/reset")]
+    public async Task<ActionResult<ApiMessageResponse>> ResetPassword(ResetPasswordWithOtpRequest request, CancellationToken cancellationToken)
+    {
+        await authService.ResetPasswordAsync(request, cancellationToken);
+        return Ok(new ApiMessageResponse("Password changed successfully. You can now log in."));
     }
 
     [HttpPost("login")]

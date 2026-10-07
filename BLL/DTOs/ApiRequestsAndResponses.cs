@@ -12,6 +12,11 @@ public record RegisterRequest(
     int? DietTypeId);
 
 public record LoginRequest([Required, EmailAddress] string Email, [Required] string Password);
+public record RequestEmailOtpRequest([Required, EmailAddress] string Email);
+public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode);
+public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
+public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
+public record ApiMessageResponse(string Message);
 public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, decimal? HeightCm, decimal? WeightKg, int? DietTypeId, bool IsActive);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);

@@ -4,9 +4,25 @@ namespace BLL.Services;
 
 public interface IAuthService
 {
-    Task<UserResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    Task<EmailOtpSentResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    Task VerifyRegistrationOtpAsync(VerifyEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task<EmailOtpSentResponse> ResendRegistrationOtpAsync(RequestEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task RequestPasswordResetAsync(RequestEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task ResetPasswordAsync(ResetPasswordWithOtpRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse> ValidateCredentialsAsync(LoginRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse?> GetUserAsync(int userId, CancellationToken cancellationToken = default);
+}
+
+public interface IEmailSender
+{
+    Task SendOtpAsync(string recipientEmail, string purpose, string otpCode, CancellationToken cancellationToken = default);
+}
+
+public sealed class SendGridSettings
+{
+    public string? ApiKey { get; init; }
+    public string? FromEmail { get; init; }
+    public string FromName { get; init; } = "Vegetarian Support System";
 }
 
 public interface IUserAdministrationService

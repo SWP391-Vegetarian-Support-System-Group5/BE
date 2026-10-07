@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
 const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
 
 builder.Services.Configure<FormOptions>(options =>
@@ -31,8 +32,11 @@ builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseSqlServ
 builder.Services.AddVegetarianBusinessLogic();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
+var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
+builder.Services.AddSingleton(sendGridSettings);
 builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));
 builder.Services.AddHttpClient("GeminiFiles", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/"));
+builder.Services.AddHttpClient("SendGrid", client => client.BaseAddress = new Uri("https://api.sendgrid.com/v3/"));
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>()));
 builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"), "uploads", "videos") });
 builder.Services.AddSingleton<LocalVideoStorage>();
@@ -40,6 +44,10 @@ builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoR
 builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
 builder.Services.AddSingleton<IKnowledgeBaseService>(_ => new LocalKnowledgeBaseService(Path.Combine(AppContext.BaseDirectory, "KnowledgeBase")));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IEmailSender>(provider => new SendGridEmailSender(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("SendGrid"),
+    provider.GetRequiredService<SendGridSettings>(),
+    provider.GetRequiredService<ILogger<SendGridEmailSender>>()));
 builder.Services.AddControllers();
 builder.Services.Configure<ApiBehaviorOptions>(options => options.InvalidModelStateResponseFactory = context =>
 {

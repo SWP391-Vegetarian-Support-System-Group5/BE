@@ -16,10 +16,23 @@ public class User
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public bool IsActive { get; set; }
+    public bool IsEmailVerified { get; set; } = true;
     public DietType? DietType { get; set; }
     public ICollection<Post> Posts { get; set; } = new List<Post>();
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
+}
+
+public class EmailOtpCode
+{
+    public int EmailOtpCodeId { get; set; }
+    public string Email { get; set; } = null!;
+    public string Purpose { get; set; } = null!;
+    public string CodeHash { get; set; } = null!;
+    public DateTime ExpiresAt { get; set; }
+    public int FailedAttempts { get; set; }
+    public DateTime? UsedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class DietType

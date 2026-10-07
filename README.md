@@ -33,18 +33,14 @@ DAL/    23 entity mappings, VegetarianDbContext, repositories
 
 The application maps the existing `VegetarianSupportSystemDB` schema. On startup, EF Core automatically applies pending migrations before seed data is checked. The migrations remove discontinued nutrition-calculation fields, secure guest chat sessions, and add the RAG Vector Store configuration table.
 
-Development connection is configured in `API/appsettings.Development.json` for the local SQL Express instance:
+The Gemini and SendGrid API keys are stored in `API/.env`, which is ignored by Git. Copy `API/.env.example` to `API/.env` and replace its placeholders:
 
 ```text
-Server=.\SQLEXPRESS;Database=VegetarianSupportSystemDB;User Id=sa;Password=12345;TrustServerCertificate=True;Encrypt=False;
+Gemini__ApiKey="<Gemini API key>"
+SendGrid__ApiKey="<SendGrid API key>"
 ```
 
-The originally supplied machine name did not resolve from the API process, while the local `.\SQLEXPRESS` instance does. Use an environment variable for any shared or production environment:
-
-```powershell
-$env:ConnectionStrings__VegetarianSupportDatabase = "<connection string>"
-$env:Jwt__Key = "<a 32+ character secret>"
-```
+Do not put API keys or future Cloudinary credentials in `appsettings.json`. For deployment, use environment variables with the same names instead of uploading `.env`.
 
 On startup, idempotent seed data is added only when absent: five diet types, four categories, six allergens, and the admin account.
 
@@ -81,7 +77,8 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 - Restaurants: `/api/restaurants`, `/nearby`, `/search`, reviews
 - Meal planner: `POST /api/meal-plans/generate`, `GET /api/meal-plans`
 - Nutrition chatbot: `/api/chat`; Gemini Free Tier with local RAG from `KnowledgeBase/`; guest sessions use the `X-Guest-Chat-Token` header
-- Other AI features currently remain mock implementations: `/api/ai/ingredient-recognition`, `/api/ai/video-summary`
+- Ingredient recognition remains a mock implementation: `/api/ai/ingredient-recognition`
+- Video recipe AI: `/api/video-recipe-drafts` uploads a cooking video, creates a Gemini-generated editable recipe draft, then publishes it as a recipe
 - Moderation: `/api/reports/*`, `/api/admin/moderation/*`
 - Admin: users, content moderation, categories, diet types, allergens, restaurants
 
@@ -89,14 +86,6 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 
 The API was verified against the existing SQL Server database with health checks, JWT login, Swagger, posts, comments, ratings, bookmarks, recipe search, restaurant search, moderation, guest chat, and a 28-meal plan generated for seven days.
 
-## Enable the real nutrition chatbot
+## Enable Gemini
 
-1. Create a Gemini API key in Google AI Studio. Do not put the key in Git or send it in chat.
-2. Set the key locally:
-
-```powershell
-dotnet user-secrets set "Gemini:ApiKey" "YOUR_GEMINI_API_KEY" --project API/API.csproj
-```
-
-3. Run the API. It reads Markdown files in `KnowledgeBase/` locally and retrieves relevant passages before calling Gemini.
-4. Create a chat session and send messages through `/api/chat/sessions/{id}/messages`.
+Add `Gemini__ApiKey` to `API/.env`, then run the API. The same key is used by the chatbot and video-recipe analysis.
