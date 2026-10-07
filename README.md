@@ -58,6 +58,15 @@ dotnet run --project API/API.csproj
 
 Swagger in Development: `http://localhost:5000/swagger` or the launch-profile URL shown by `dotnet run`.
 
+To run Swagger and test database-independent endpoints without a local database:
+
+```powershell
+$env:Database__RunStartupTasks = "false"
+dotnet run --project API/API.csproj --launch-profile http
+```
+
+This mode supports health and location catalogue endpoints. Authentication, restaurants, posts, recipes, meal plans, and other database-backed endpoints remain unavailable.
+
 ## Authentication
 
 Use `POST /api/auth/login` then paste the returned token into Swagger's **Authorize** dialog.
