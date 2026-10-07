@@ -1,4 +1,6 @@
 using BLL.DTOs;
+using System.Reflection;
+using System.Text.Json;
 
 namespace BLL.Services;
 
@@ -46,7 +48,7 @@ public sealed class VietnamLocationService : ILocationService
         new("ninhbinh", "Ninh Bình", "Tỉnh", 20.2506m, 105.9745m)
     ];
 
-    private static readonly IReadOnlyDictionary<string, AreaResponse[]> Areas =
+    private static readonly IReadOnlyDictionary<string, AreaResponse[]> CuratedAreas =
         new Dictionary<string, AreaResponse[]>(StringComparer.OrdinalIgnoreCase)
         {
             ["hochiminh"] =
@@ -85,6 +87,38 @@ public sealed class VietnamLocationService : ILocationService
             ]
         };
 
+    private static readonly IReadOnlyDictionary<string, AreaResponse[]> Areas = LoadAreas();
+
+    private sealed record AdministrativeArea(string Code, string Name, string Type);
+
+    private static IReadOnlyDictionary<string, AreaResponse[]> LoadAreas()
+    {
+        var assembly = typeof(VietnamLocationService).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .Single(name => name.EndsWith("VietnamAdministrativeAreas.json", StringComparison.Ordinal));
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException("Vietnam administrative catalogue resource was not found.");
+        var catalogue = JsonSerializer.Deserialize<Dictionary<string, AdministrativeArea[]>>(
+            stream,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("Vietnam administrative catalogue could not be read.");
+
+        return Provinces.ToDictionary(
+            province => province.Code,
+            province =>
+            {
+                var curatedByName = CuratedAreas.GetValueOrDefault(province.Code, [])
+                    .ToDictionary(area => area.Name, StringComparer.OrdinalIgnoreCase);
+                var officialAreas = catalogue.GetValueOrDefault(province.Code, []);
+                return new[] { new AreaResponse("all", $"Tất cả {province.Name}", "Khu vực", province.Latitude, province.Longitude) }
+                    .Concat(officialAreas.Select(area => curatedByName.TryGetValue(area.Name, out var curated)
+                        ? new AreaResponse(area.Code, area.Name, area.Type, curated.Latitude, curated.Longitude)
+                        : new AreaResponse(area.Code, area.Name, area.Type, null, null)))
+                    .ToArray();
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     public IReadOnlyCollection<ProvinceResponse> GetProvinces() => Provinces;
 
     public IReadOnlyCollection<AreaResponse>? GetAreas(string provinceCode)
@@ -92,9 +126,6 @@ public sealed class VietnamLocationService : ILocationService
         var province = Provinces.FirstOrDefault(item => item.Code.Equals(provinceCode, StringComparison.OrdinalIgnoreCase));
         if (province is null) return null;
 
-        // Provinces not curated yet still expose a stable whole-province option for geocoding.
-        return Areas.TryGetValue(provinceCode, out var areas)
-            ? areas
-            : [new AreaResponse("all", $"Toàn {province.Name}", "Khu vực", province.Latitude, province.Longitude)];
+        return Areas.GetValueOrDefault(provinceCode);
     }
 }

@@ -67,6 +67,8 @@ dotnet run --project API/API.csproj --launch-profile http
 
 This mode supports health and location catalogue endpoints. Authentication, restaurants, posts, recipes, meal plans, and other database-backed endpoints remain unavailable.
 
+The location catalogue is embedded in the BLL and does not require SQL Server. It contains all 34 provincial-level units and all 3,321 commune-level units effective from 1 July 2025 under Decision 19/2025/QD-TTg. Each area uses its official five-digit administrative code. The source PDFs and generated catalogue can be validated again with `scripts/extract_administrative_areas.py`.
+
 ## Authentication
 
 Use `POST /api/auth/login` then paste the returned token into Swagger's **Authorize** dialog.
