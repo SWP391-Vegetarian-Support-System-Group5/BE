@@ -5,11 +5,7 @@ namespace BLL.DTOs;
 public record RegisterRequest(
     [Required, EmailAddress] string Email,
     [Required, MinLength(6)] string Password,
-    [Required, MaxLength(150)] string FullName,
-    [Required] string Sex,
-    [Range(1, 300)] decimal HeightCm,
-    [Range(1, 1000)] decimal WeightKg,
-    int? DietTypeId);
+    [Required, MaxLength(150)] string Name);
 
 public record LoginRequest([Required, EmailAddress] string Email, [Required] string Password);
 public record RequestEmailOtpRequest([Required, EmailAddress] string Email);
@@ -18,6 +14,14 @@ public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email,
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
 public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, decimal? HeightCm, decimal? WeightKg, int? DietTypeId, bool IsActive);
+public record UpdateUserProfileRequest(
+    [Required, MaxLength(150)] string FullName,
+    string? Sex,
+    [Range(1, 300)] decimal? HeightCm,
+    [Range(1, 1000)] decimal? WeightKg,
+    int? DietTypeId,
+    [Range(-90, 90)] decimal? Latitude,
+    [Range(-180, 180)] decimal? Longitude);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);

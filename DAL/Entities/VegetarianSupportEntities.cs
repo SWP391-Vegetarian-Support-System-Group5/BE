@@ -6,6 +6,19 @@ public class User
     public string Email { get; set; } = null!;
     public string PasswordHash { get; set; } = null!;
     public string Role { get; set; } = "USER";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsEmailVerified { get; set; } = true;
+    public UserProfile? Profile { get; set; }
+    public ICollection<Post> Posts { get; set; } = new List<Post>();
+    public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+    public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
+}
+
+public class UserProfile
+{
+    public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }
     public decimal? HeightCm { get; set; }
@@ -13,14 +26,8 @@ public class User
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    public bool IsActive { get; set; }
-    public bool IsEmailVerified { get; set; } = true;
+    public User User { get; set; } = null!;
     public DietType? DietType { get; set; }
-    public ICollection<Post> Posts { get; set; } = new List<Post>();
-    public ICollection<Comment> Comments { get; set; } = new List<Comment>();
-    public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
 }
 
 public class EmailOtpCode
@@ -39,7 +46,7 @@ public class DietType
 {
     public int DietTypeId { get; set; }
     public string Name { get; set; } = null!;
-    public ICollection<User> Users { get; set; } = new List<User>();
+    public ICollection<UserProfile> UserProfiles { get; set; } = new List<UserProfile>();
     public ICollection<Restaurant> Restaurants { get; set; } = new List<Restaurant>();
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
 }

@@ -6,6 +6,7 @@ namespace DAL.Data;
 public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<EmailOtpCode> EmailOtpCodes => Set<EmailOtpCode>();
     public DbSet<DietType> DietTypes => Set<DietType>();
     public DbSet<Category> Categories => Set<Category>();
@@ -53,16 +54,23 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasIndex(x => x.Email).IsUnique();
             entity.Property(x => x.PasswordHash).HasMaxLength(500).IsUnicode(false).IsRequired();
             entity.Property(x => x.Role).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.CreatedAt).IsRequired();
+            entity.Property(x => x.UpdatedAt).IsRequired();
+            entity.Property(x => x.IsEmailVerified).IsRequired().HasDefaultValue(true);
+            entity.HasOne(x => x.Profile).WithOne(x => x.User).HasForeignKey<UserProfile>(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<UserProfile>(entity =>
+        {
+            entity.ToTable("UserProfiles");
+            entity.HasKey(x => x.UserId);
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);
             entity.Property(x => x.HeightCm).HasPrecision(5, 2);
             entity.Property(x => x.WeightKg).HasPrecision(6, 2);
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
-            entity.Property(x => x.CreatedAt).IsRequired();
-            entity.Property(x => x.UpdatedAt).IsRequired();
-            entity.Property(x => x.IsEmailVerified).IsRequired().HasDefaultValue(true);
-            entity.HasOne(x => x.DietType).WithMany(x => x.Users).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.DietType).WithMany(x => x.UserProfiles).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<EmailOtpCode>(entity =>

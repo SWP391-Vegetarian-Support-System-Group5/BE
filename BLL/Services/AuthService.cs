@@ -9,7 +9,7 @@ namespace BLL.Services;
 
 public class AuthService(
     IRepository<User> users,
-    IRepository<DietType> dietTypes,
+    IRepository<UserProfile> profiles,
     IRepository<EmailOtpCode> otpCodes,
     IEmailSender emailSender) : IAuthService
 {
@@ -24,22 +24,12 @@ public class AuthService(
         var email = request.Email.Trim().ToLowerInvariant();
         if (await users.Query().AnyAsync(x => x.Email == email, cancellationToken))
             throw new ServiceException("Email is already registered.", 409);
-        if (request.DietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == request.DietTypeId, cancellationToken))
-            throw new ServiceException("Diet type was not found.", 404);
-
-        var sex = FixedValues.Sex(request.Sex);
-
         var now = DateTime.UtcNow;
         var user = new User
         {
             Email = email,
             PasswordHash = PasswordHasher.Hash(request.Password),
             Role = "USER",
-            FullName = request.FullName.Trim(),
-            Sex = sex,
-            HeightCm = request.HeightCm,
-            WeightKg = request.WeightKg,
-            DietTypeId = request.DietTypeId,
             CreatedAt = now,
             UpdatedAt = now,
             IsActive = true,
@@ -47,6 +37,8 @@ public class AuthService(
         };
         await users.AddAsync(user, cancellationToken);
         await users.SaveChangesAsync(cancellationToken);
+        await profiles.AddAsync(new UserProfile { UserId = user.UserId, FullName = request.Name.Trim() }, cancellationToken);
+        await profiles.SaveChangesAsync(cancellationToken);
         return await CreateAndSendOtpAsync(email, RegistrationPurpose, cancellationToken);
     }
 
@@ -56,7 +48,8 @@ public class AuthService(
         var user = await users.Query().SingleOrDefaultAsync(x => x.Email == email, cancellationToken)
             ?? throw new ServiceException("The verification code is invalid or has expired.", 400);
 
-        if (user.IsEmailVerified) return;
+        if (user.IsEmailVerified)
+            throw new ServiceException("This email address has already been verified. Please log in.", 409);
 
         await ValidateOtpAsync(email, RegistrationPurpose, request.OtpCode, cancellationToken);
         user.IsEmailVerified = true;
@@ -67,7 +60,7 @@ public class AuthService(
     public async Task<EmailOtpSentResponse> ResendRegistrationOtpAsync(RequestEmailOtpRequest request, CancellationToken cancellationToken = default)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var user = await users.Query().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var user = await users.Query().Include(x => x.Profile).SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
         if (user is null || user.IsEmailVerified)
             throw new ServiceException("No pending email verification was found for this address.", 404);
 
@@ -97,7 +90,7 @@ public class AuthService(
     public async Task<UserResponse> ValidateCredentialsAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var user = await users.Query().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var user = await users.Query().Include(x => x.Profile).SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
         if (user is null || !PasswordHasher.Verify(request.Password, user.PasswordHash))
             throw new ServiceException("Invalid email or password.", 401);
         if (!user.IsEmailVerified)
@@ -109,11 +102,19 @@ public class AuthService(
 
     public async Task<UserResponse?> GetUserAsync(int userId, CancellationToken cancellationToken = default)
     {
-        var user = await users.Query().SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+        var user = await users.Query().Include(x => x.Profile).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken);
         return user is null ? null : ToResponse(user);
     }
 
-    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.FullName, user.Sex, user.HeightCm, user.WeightKg, user.DietTypeId, user.IsActive);
+    public async Task<UserResponse> GetUserByEmailAsync(string email, CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        var user = await users.Query().Include(x => x.Profile).SingleOrDefaultAsync(x => x.Email == normalizedEmail, cancellationToken)
+            ?? throw new ServiceException("User was not found.", 404);
+        return ToResponse(user);
+    }
+
+    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.Profile?.FullName ?? "Unknown user", user.Profile?.Sex, user.Profile?.HeightCm, user.Profile?.WeightKg, user.Profile?.DietTypeId, user.IsActive);
 
     private async Task<EmailOtpSentResponse> CreateAndSendOtpAsync(string email, string purpose, CancellationToken cancellationToken)
     {

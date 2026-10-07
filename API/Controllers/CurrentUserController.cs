@@ -9,9 +9,10 @@ namespace API.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/users/me")]
-public class CurrentUserController(IAuthService authService, IUserAllergenService userAllergenService, IPostService postService) : ControllerBase
+public class CurrentUserController(IAuthService authService, IUserProfileService userProfileService, IUserAllergenService userAllergenService, IPostService postService) : ControllerBase
 {
     [HttpGet] public async Task<ActionResult<UserResponse>> Get(CancellationToken ct) => (await authService.GetUserAsync(User.GetRequiredUserId(), ct)) is { } user ? Ok(user) : NotFound();
+    [HttpPut("profile")] public Task<UserResponse> UpdateProfile(UpdateUserProfileRequest request, CancellationToken ct) => userProfileService.UpdateAsync(User.GetRequiredUserId(), request, ct);
     [HttpGet("allergens")] public Task<UserAllergensResponse> GetAllergens(CancellationToken ct) => userAllergenService.GetAsync(User.GetRequiredUserId(), ct);
     [HttpPut("allergens")] public Task<UserAllergensResponse> UpdateAllergens(UpdateUserAllergensRequest request, CancellationToken ct) => userAllergenService.UpdateAsync(User.GetRequiredUserId(), request, ct);
     [HttpGet("bookmarks")] public Task<IReadOnlyCollection<PostResponse>> GetBookmarks(CancellationToken ct) => postService.GetBookmarksAsync(User.GetRequiredUserId(), ct);

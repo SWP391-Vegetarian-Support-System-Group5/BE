@@ -72,7 +72,7 @@ public class NutritionChatbotService(
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(int? userId, string message, CancellationToken cancellationToken)
     {
         var user = userId.HasValue
-            ? await users.Query().Include(x => x.DietType).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ? await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             : null;
         var items = await recipes.Query()
             .Include(x => x.Post)
@@ -83,7 +83,7 @@ public class NutritionChatbotService(
         var allergens = user?.UserAllergens.Select(x => x.AllergenId).ToHashSet() ?? [];
         var terms = message.Split([' ', ',', '.', '?', '!', ':', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(x => x.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var dietTypeId = user?.DietTypeId;
+        var dietTypeId = user?.Profile?.DietTypeId;
         return items
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
             .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && allergens.Contains(i.AllergenId.Value)))
@@ -97,9 +97,9 @@ public class NutritionChatbotService(
     private async Task<string> BuildApplicationContextAsync(int? userId, IEnumerable<ChatMessage> previousMessages, IReadOnlyCollection<RelatedRecipeResponse> relatedRecipes, CancellationToken cancellationToken)
     {
         var user = userId.HasValue
-            ? await users.Query().Include(x => x.DietType).Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ? await users.Query().Include(x => x.Profile).ThenInclude(x => x.DietType).Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             : null;
-        var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", user.UserAllergens.Select(x => x.Allergen.Name))}.";
+        var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.Profile?.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", user.UserAllergens.Select(x => x.Allergen.Name))}.";
         var recipeContext = relatedRecipes.Count == 0 ? "No matching recipes were found." : string.Join("\n", relatedRecipes.Select(x => $"- RecipeId {x.RecipeId}: {x.Title}"));
         var history = string.Join("\n", previousMessages.OrderByDescending(x => x.ChatMessageId).Take(10).Reverse().Select(x => $"{x.Sender}: {x.Content}"));
         return $"USER PROFILE:\n{profile}\n\nSAFE RECIPE SUGGESTIONS:\n{recipeContext}\n\nRECENT CONVERSATION:\n{history}";

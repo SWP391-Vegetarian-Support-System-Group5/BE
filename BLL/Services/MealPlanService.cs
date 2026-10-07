@@ -14,8 +14,9 @@ public class MealPlanService(
 {
     public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken cancellationToken = default)
     {
-        var user = await users.Query().Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new ServiceException("User was not found.", 404);
+        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new ServiceException("User was not found.", 404);
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+        var dietTypeId = user.Profile?.DietTypeId;
         var candidates = await recipes.Query()
             .Include(x => x.Post)
             .Include(x => x.Ingredients)
@@ -24,7 +25,7 @@ public class MealPlanService(
             .ToListAsync(cancellationToken);
         candidates = candidates
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
-            .Where(x => !user.DietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == user.DietTypeId && d.IsCompatible))
+            .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
             .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
             .ToList();
         if (candidates.Count == 0) throw new ServiceException("No recipe matches the user's diet type and allergens.", 400);

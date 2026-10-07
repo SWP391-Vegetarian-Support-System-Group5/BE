@@ -18,10 +18,11 @@ public class AuthenticationController(IAuthService authService, IJwtTokenService
     }
 
     [HttpPost("register/verify-otp")]
-    public async Task<ActionResult<ApiMessageResponse>> VerifyRegistrationOtp(VerifyEmailOtpRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<AuthResponse>> VerifyRegistrationOtp(VerifyEmailOtpRequest request, CancellationToken cancellationToken)
     {
         await authService.VerifyRegistrationOtpAsync(request, cancellationToken);
-        return Ok(new ApiMessageResponse("Email verified successfully. You can now log in."));
+        var user = await authService.GetUserByEmailAsync(request.Email, cancellationToken);
+        return Ok(new AuthResponse(tokenService.Create(user), user));
     }
 
     [HttpPost("register/resend-otp")]

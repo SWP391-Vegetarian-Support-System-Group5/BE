@@ -11,6 +11,7 @@ public interface IAuthService
     Task ResetPasswordAsync(ResetPasswordWithOtpRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse> ValidateCredentialsAsync(LoginRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse?> GetUserAsync(int userId, CancellationToken cancellationToken = default);
+    Task<UserResponse> GetUserByEmailAsync(string email, CancellationToken cancellationToken = default);
 }
 
 public interface IEmailSender
@@ -37,6 +38,11 @@ public interface IUserAllergenService
 {
     Task<UserAllergensResponse> GetAsync(int userId, CancellationToken cancellationToken = default);
     Task<UserAllergensResponse> UpdateAsync(int userId, UpdateUserAllergensRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface IUserProfileService
+{
+    Task<UserResponse> UpdateAsync(int userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IReferenceDataAndRestaurantService
