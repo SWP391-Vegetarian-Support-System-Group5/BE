@@ -17,7 +17,7 @@ public sealed class VietnamLocationService : ILocationService
         new("haiphong", "Hải Phòng", "Thành phố", 20.8449m, 106.6881m),
         new("danang", "Đà Nẵng", "Thành phố", 16.0544m, 108.2022m),
         new("cantho", "Cần Thơ", "Thành phố", 10.0452m, 105.7469m),
-        new("hochiminh", "Hồ Chí Minh", "Thành phố", 10.8231m, 106.6297m),
+        new("hochiminh", "Tp. Hồ Chí Minh", "Thành phố", 10.8231m, 106.6297m),
         new("laocai", "Lào Cai", "Tỉnh", 22.4809m, 103.9755m),
         new("tuyenquang", "Tuyên Quang", "Tỉnh", 21.7767m, 105.2280m),
         new("caobang", "Cao Bằng", "Tỉnh", 22.6666m, 106.2640m),
@@ -110,7 +110,7 @@ public sealed class VietnamLocationService : ILocationService
                 var curatedByName = CuratedAreas.GetValueOrDefault(province.Code, [])
                     .ToDictionary(area => area.Name, StringComparer.OrdinalIgnoreCase);
                 var officialAreas = catalogue.GetValueOrDefault(province.Code, []);
-                return new[] { new AreaResponse("all", $"Tất cả {province.Name}", "Khu vực", province.Latitude, province.Longitude) }
+                return new[] { new AreaResponse("all", "Tất cả", "Khu vực", province.Latitude, province.Longitude) }
                     .Concat(officialAreas.Select(area => curatedByName.TryGetValue(area.Name, out var curated)
                         ? new AreaResponse(area.Code, area.Name, area.Type, curated.Latitude, curated.Longitude)
                         : new AreaResponse(area.Code, area.Name, area.Type, null, null)))
