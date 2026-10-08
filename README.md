@@ -54,6 +54,17 @@ dotnet run --project API/API.csproj
 
 Swagger in Development: `http://localhost:5000/swagger` or the launch-profile URL shown by `dotnet run`.
 
+To run Swagger and test database-independent endpoints without a local database:
+
+```powershell
+$env:Database__RunStartupTasks = "false"
+dotnet run --project API/API.csproj --launch-profile http
+```
+
+This mode supports health and location catalogue endpoints. Authentication, restaurants, posts, recipes, meal plans, and other database-backed endpoints remain unavailable.
+
+The location catalogue is embedded in the BLL and does not require SQL Server. It contains all 34 provincial-level units and all 3,321 commune-level units effective from 1 July 2025 under Decision 19/2025/QD-TTg. Each area uses its official five-digit administrative code. The source PDFs and generated catalogue can be validated again with `scripts/extract_administrative_areas.py`.
+
 ## Authentication
 
 Use `POST /api/auth/login` then paste the returned token into Swagger's **Authorize** dialog.
@@ -75,6 +86,7 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 - Posts: `/api/posts`, comments, ratings and bookmarks
 - Recipes: `POST /api/recipes`, `GET /api/recipes/{id}`, `GET /api/recipes/search`
 - Restaurants: `/api/restaurants`, `/nearby`, `/search`, reviews
+- Locations: `GET /api/locations/provinces`, `GET /api/locations/provinces/{provinceCode}/areas`
 - Meal planner: `POST /api/meal-plans/generate`, `GET /api/meal-plans`
 - Nutrition chatbot: `/api/chat`; Gemini Free Tier with local RAG from `KnowledgeBase/`; guest sessions use the `X-Guest-Chat-Token` header
 - Ingredient recognition remains a mock implementation: `/api/ai/ingredient-recognition`
