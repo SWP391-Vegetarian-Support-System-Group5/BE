@@ -43,6 +43,19 @@ if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOp
 
 builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddVegetarianBusinessLogic();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
+builder.Services.AddHttpClient("Photon", client =>
+{
+    client.BaseAddress = new Uri("https://photon.komoot.io/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+builder.Services.AddHttpClient("Overpass", client =>
+{
+    client.BaseAddress = new Uri("https://overpass-api.de/");
+    client.Timeout = TimeSpan.FromSeconds(12);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
+});
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();

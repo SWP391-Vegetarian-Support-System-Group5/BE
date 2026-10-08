@@ -13,6 +13,12 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
             logger.LogWarning(exception, "Request failed with a business validation error.");
             await WriteAsync(context, exception.StatusCode, exception.Message, exception.Errors);
         }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !context.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "An external service is temporarily unavailable.");
+            await WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
+                "The map data provider is temporarily unavailable. Please try again.", []);
+        }
         catch (Exception exception)
         {
             logger.LogError(exception, "Unhandled API error.");
