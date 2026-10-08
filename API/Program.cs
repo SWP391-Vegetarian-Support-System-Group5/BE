@@ -4,6 +4,7 @@ using API.Services;
 using BLL.Services;
 using DAL.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -13,7 +14,19 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
+var runDatabaseStartupTasks = builder.Configuration.GetValue("Database:RunStartupTasks", true);
 const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
+
+if (!runDatabaseStartupTasks)
+{
+    // Location-only development mode must not depend on Windows Event Log or persisted keys.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, ".local", "DataProtection-Keys"));
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(keyDirectory)
+        .SetApplicationName("VegetarianSupportSystem.Local");
+}
 
 builder.Services.Configure<FormOptions>(options =>
 {
@@ -41,7 +54,7 @@ builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(
 builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"), "uploads", "videos") });
 builder.Services.AddSingleton<LocalVideoStorage>();
 builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>()));
-builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
+if (runDatabaseStartupTasks) builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
 builder.Services.AddSingleton<IKnowledgeBaseService>(_ => new LocalKnowledgeBaseService(Path.Combine(AppContext.BaseDirectory, "KnowledgeBase")));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender>(provider => new SendGridEmailSender(
@@ -92,6 +105,7 @@ builder.Services.AddSwaggerGen(options =>
             "Reports" => "Moderation",
             "Administration" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
+            "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
             _ => "Other"
         };
@@ -104,18 +118,23 @@ builder.Services.AddSwaggerGen(options =>
 var app = builder.Build();
 app.UseMiddleware<ApiExceptionMiddleware>();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
-app.UseHttpsRedirection();
+if (runDatabaseStartupTasks) app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-using (var scope = app.Services.CreateScope())
+if (runDatabaseStartupTasks)
 {
+    using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await services.GetRequiredService<ISeedService>().SeedAsync();
+}
+else
+{
+    Console.WriteLine("Database migration and seed are disabled. Database-backed endpoints are unavailable.");
 }
 
 app.Run();
