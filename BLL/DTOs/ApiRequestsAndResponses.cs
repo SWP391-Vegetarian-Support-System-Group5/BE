@@ -62,3 +62,5 @@ public record UpdateVideoRecipeDraftRequest([Required, MaxLength(250)] string Ti
 public record PublishVideoRecipeDraftRequest(int? CategoryId, List<int>? TagIds);
 public record ReportRequest([Required, MaxLength(500)] string Reason);
 public record ModerationFlagResponse(int FlagId, int? PostId, int? CommentId, string Source, string? Reason, string Status, int? ReportedBy, int? ReviewedBy);
+public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
+    [Range(1, int.MaxValue)] int? EstimatedPrepMinutes,[Range(0.01, 1000)] decimal? Servings,int? CategoryId,[Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps);
