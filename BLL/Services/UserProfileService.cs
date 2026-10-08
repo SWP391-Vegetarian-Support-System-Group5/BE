@@ -17,8 +17,11 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
 
         profile.FullName = request.FullName.Trim();
         profile.Sex = string.IsNullOrWhiteSpace(request.Sex) ? null : FixedValues.Sex(request.Sex);
+        profile.BirthDate = request.BirthDate?.Date;
         profile.HeightCm = request.HeightCm;
         profile.WeightKg = request.WeightKg;
+        profile.ActivityLevel = string.IsNullOrWhiteSpace(request.ActivityLevel) ? null : FixedValues.ActivityLevel(request.ActivityLevel);
+        profile.HealthGoal = string.IsNullOrWhiteSpace(request.HealthGoal) ? null : FixedValues.HealthGoal(request.HealthGoal);
         profile.DietTypeId = request.DietTypeId;
         profile.Latitude = request.Latitude;
         profile.Longitude = request.Longitude;

@@ -114,7 +114,7 @@ public class AuthService(
         return ToResponse(user);
     }
 
-    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.Profile?.FullName ?? "Unknown user", user.Profile?.Sex, user.Profile?.HeightCm, user.Profile?.WeightKg, user.Profile?.DietTypeId, user.IsActive);
+    public static UserResponse ToResponse(User user) => new(user.UserId, user.Email, user.Role, user.Profile?.FullName ?? "Unknown user", user.Profile?.Sex, user.Profile?.BirthDate, user.Profile?.HeightCm, user.Profile?.WeightKg, user.Profile?.ActivityLevel, user.Profile?.HealthGoal, user.Profile?.DietTypeId, user.IsActive);
 
     private async Task<EmailOtpSentResponse> CreateAndSendOtpAsync(string email, string purpose, CancellationToken cancellationToken)
     {

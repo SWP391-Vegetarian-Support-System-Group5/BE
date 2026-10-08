@@ -97,7 +97,7 @@ public class NutritionChatbotService(
     private async Task<string> BuildApplicationContextAsync(int? userId, IEnumerable<ChatMessage> previousMessages, IReadOnlyCollection<RelatedRecipeResponse> relatedRecipes, CancellationToken cancellationToken)
     {
         var user = userId.HasValue
-            ? await users.Query().Include(x => x.Profile).ThenInclude(x => x.DietType).Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ? await users.Query().Include("Profile.DietType").Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             : null;
         var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.Profile?.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", user.UserAllergens.Select(x => x.Allergen.Name))}.";
         var recipeContext = relatedRecipes.Count == 0 ? "No matching recipes were found." : string.Join("\n", relatedRecipes.Select(x => $"- RecipeId {x.RecipeId}: {x.Title}"));

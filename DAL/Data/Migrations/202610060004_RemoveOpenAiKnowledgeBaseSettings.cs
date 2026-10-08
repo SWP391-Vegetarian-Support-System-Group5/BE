@@ -10,7 +10,13 @@ namespace DAL.Data.Migrations;
 [Migration("202610060004_RemoveOpenAiKnowledgeBaseSettings")]
 public partial class RemoveOpenAiKnowledgeBaseSettings : Migration
 {
-    protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.DropTable(name: "AiKnowledgeBaseSettings");
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.Sql("""
+            IF OBJECT_ID(N'[AiKnowledgeBaseSettings]', N'U') IS NOT NULL
+                DROP TABLE [AiKnowledgeBaseSettings];
+            """);
+    }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {

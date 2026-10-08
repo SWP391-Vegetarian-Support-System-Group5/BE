@@ -58,6 +58,9 @@ public class VideoRecipeDraftsController(IVideoRecipeDraftService videoRecipeDra
             return BadRequest(new { success = false, message = "The JSON format in requestJson is invalid." });
         }
 
+        if (!TryValidateModel(request))
+            return ValidationProblem(ModelState);
+
         await using var stream = video.OpenReadStream();
         var draft = await videoRecipeDraftService.CreateManualAsync(
             User.GetRequiredUserId(),

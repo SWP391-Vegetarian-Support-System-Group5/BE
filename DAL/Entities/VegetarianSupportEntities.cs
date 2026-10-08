@@ -21,8 +21,11 @@ public class UserProfile
     public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }
+    public DateTime? BirthDate { get; set; }
     public decimal? HeightCm { get; set; }
     public decimal? WeightKg { get; set; }
+    public string? ActivityLevel { get; set; }
+    public string? HealthGoal { get; set; }
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
@@ -116,6 +119,10 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
+    public decimal? ProteinPerServing { get; set; }
+    public decimal? CarbsPerServing { get; set; }
+    public decimal? FatPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
@@ -204,6 +211,11 @@ public class MealPlan
     public int UserId { get; set; }
     public DateTime StartDate { get; set; }
     public string? AvailableIngredients { get; set; }
+    public decimal? BMI { get; set; }
+    public decimal? BMR { get; set; }
+    public decimal? TDEE { get; set; }
+    public decimal? TargetCaloriesPerDay { get; set; }
+    public string? HealthGoal { get; set; }
     public User User { get; set; } = null!;
     public ICollection<MealPlanMeal> Meals { get; set; } = new List<MealPlanMeal>();
 }
@@ -215,6 +227,7 @@ public class MealPlanMeal
     public int DayNumber { get; set; }
     public string MealType { get; set; } = null!;
     public int RecipeId { get; set; }
+    public decimal? PlannedCalories { get; set; }
     public MealPlan MealPlan { get; set; } = null!;
     public Recipe Recipe { get; set; } = null!;
 }
@@ -250,10 +263,17 @@ public class VideoRecipeDraft
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }
+    public decimal? Servings { get; set; }
+    public int? CategoryId { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
+    public decimal? ProteinPerServing { get; set; }
+    public decimal? CarbsPerServing { get; set; }
+    public decimal? FatPerServing { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public User User { get; set; } = null!;
+    public Category? Category { get; set; }
     public ICollection<VideoRecipeDraftIngredient> Ingredients { get; set; } = new List<VideoRecipeDraftIngredient>();
     public ICollection<VideoRecipeDraftStep> Steps { get; set; } = new List<VideoRecipeDraftStep>();
 }
