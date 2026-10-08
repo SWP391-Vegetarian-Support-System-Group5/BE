@@ -137,6 +137,7 @@ public interface IVideoRecipeDraftService
     Task<RecipeResponse> PublishAsync(int id, int userId, string role, PublishVideoRecipeDraftRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default);
     Task ProcessPendingAsync(CancellationToken cancellationToken = default);
+    Task<VideoRecipeDraftResponse> CreateManualAsync(int userId, Stream videoStream, string fileName, string contentType, CreateManualVideoRecipeDraftRequest request, CancellationToken ct = default);
 }
 public interface IModerationAiService { Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default); }
 

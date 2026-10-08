@@ -1,4 +1,4 @@
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text.Json;
 using BLL.Common;
 using BLL.DTOs;
@@ -258,6 +258,63 @@ public sealed class VideoRecipeDraftService(
         }
     }
 
+    public async Task<VideoRecipeDraftResponse> CreateManualAsync(
+    int userId,
+    Stream videoStream,
+    string fileName,
+    string contentType,
+    CreateManualVideoRecipeDraftRequest request,
+    CancellationToken cancellationToken = default)
+    {
+        if (request.Ingredients.Count == 0 || request.Steps.Count == 0)
+            throw new ServiceException("Vui lòng cung cấp ít nhất 1 nguyên liệu và 1 bước thực hiện.", 400);
+
+        var videoUrl = await storage.SaveAsync(videoStream, fileName, cancellationToken);
+        var draft = new VideoRecipeDraft
+        {
+            UserId = userId,
+            VideoUrl = videoUrl,
+            Status = "READY",
+            //Source = "MANUAL",
+            Title = request.Title.Trim(),
+            Description = request.Description.Trim(),
+            Transcript = request.Transcript?.Trim(),
+            EstimatedPrepMinutes = request.EstimatedPrepMinutes,
+            //Servings = request.Servings,
+            //CategoryId = request.CategoryId,
+            CreatedAt = VietnamTime.Now,
+            UpdatedAt = VietnamTime.Now
+        };
+
+        await drafts.AddAsync(draft, cancellationToken);
+        await drafts.SaveChangesAsync(cancellationToken);
+
+        foreach (var item in request.Ingredients)
+        {
+            await ingredients.AddAsync(new VideoRecipeDraftIngredient
+            {
+                VideoRecipeDraftId = draft.VideoRecipeDraftId,
+                IngredientName = item.IngredientName.Trim(),
+                Amount = item.Amount?.Trim(),
+                DietaryGroup = VegetarianDietRules.NormalizeIngredientGroup(item.DietaryGroup),
+                AllergenId = item.AllergenId
+            }, cancellationToken);
+        }
+
+        foreach (var item in request.Steps)
+        {
+            await steps.AddAsync(new VideoRecipeDraftStep
+            {
+                VideoRecipeDraftId = draft.VideoRecipeDraftId,
+                StepNumber = item.StepNumber,
+                Instruction = item.Instruction.Trim()
+            }, cancellationToken);
+        }
+
+        await drafts.SaveChangesAsync(cancellationToken);
+
+        return await GetAsync(draft.VideoRecipeDraftId, userId, "USER", cancellationToken);
+    }
     private async Task<VideoRecipeDraft> GetOwnedDraftAsync(int id, int userId, string role, CancellationToken ct) =>
         await drafts.Query().Include(x => x.Ingredients).Include(x => x.Steps).SingleOrDefaultAsync(x => x.VideoRecipeDraftId == id, ct) is { } draft
             ? role == "ADMIN" || draft.UserId == userId ? draft : throw new ServiceException("You do not have permission to access this video draft.", 403)
