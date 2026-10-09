@@ -16,8 +16,7 @@
       "launchUrl": "swagger",
       "applicationUrl": "http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "Database__RunStartupTasks": "false"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
     "https": {
@@ -27,8 +26,7 @@
       "launchUrl": "swagger",
       "applicationUrl": "https://localhost:7058;http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "Database__RunStartupTasks": "false"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
     "IIS Express": {

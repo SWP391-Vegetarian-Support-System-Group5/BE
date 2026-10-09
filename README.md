@@ -82,6 +82,7 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 
 - Health: `GET /api/health`, `GET /api/health/db`
 - Auth: `POST /api/auth/register`, `POST /api/auth/login`
+- Current user: `GET /api/users/me`, `PUT /api/users/me/profile`, `PUT /api/users/me/location`
 - Reference data: `GET /api/diet-types`, `GET /api/categories`, `GET /api/allergens`, `GET /api/tags`
 - Posts: `/api/posts`, comments, ratings and bookmarks
 - Recipes: `POST /api/recipes`, `GET /api/recipes/{id}`, `GET /api/recipes/search`

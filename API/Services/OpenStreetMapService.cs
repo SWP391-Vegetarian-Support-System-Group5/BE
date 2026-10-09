@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
@@ -46,30 +47,50 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         var cacheKey = $"map:suggestions:{normalizedQuery.ToLowerInvariant()}:{Round(latitude)}:{Round(longitude)}";
         if (cache.TryGetValue(cacheKey, out AddressSuggestionResponse[]? cached) && cached is not null) return cached;
 
-        var parameters = new Dictionary<string, string?>
+        try
         {
-            ["q"] = normalizedQuery,
-            ["limit"] = "5",
-            ["lat"] = latitude?.ToString(CultureInfo.InvariantCulture),
-            ["lon"] = longitude?.ToString(CultureInfo.InvariantCulture)
-        };
-        var uri = $"api?{BuildQuery(parameters)}";
-        var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
-        var results = payload.Features
-            .Where(feature => feature.Geometry.Coordinates.Count >= 2 && IsVietnam(feature.Properties.Country))
-            .Select((feature, index) =>
+            var parameters = new Dictionary<string, string?>
             {
-                var properties = feature.Properties;
-                return new AddressSuggestionResponse(
-                    properties.OsmId?.ToString(CultureInfo.InvariantCulture) ?? $"{feature.Geometry.Coordinates[0]}-{feature.Geometry.Coordinates[1]}-{index}",
-                    FormatPhotonAddress(properties),
-                    feature.Geometry.Coordinates[1],
-                    feature.Geometry.Coordinates[0]);
-            })
-            .ToArray();
+                ["q"] = normalizedQuery,
+                ["limit"] = "5",
+                ["lat"] = latitude?.ToString(CultureInfo.InvariantCulture),
+                ["lon"] = longitude?.ToString(CultureInfo.InvariantCulture)
+            };
+            var uri = $"api?{BuildQuery(parameters)}";
+            var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
+            var results = payload.Features
+                .Where(feature => feature.Geometry.Coordinates.Count >= 2 && IsVietnam(feature.Properties.Country))
+                .Select((feature, index) =>
+                {
+                    var properties = feature.Properties;
+                    return new AddressSuggestionResponse(
+                        properties.OsmId?.ToString(CultureInfo.InvariantCulture) ?? $"{feature.Geometry.Coordinates[0]}-{feature.Geometry.Coordinates[1]}-{index}",
+                        FormatPhotonAddress(properties),
+                        feature.Geometry.Coordinates[1],
+                        feature.Geometry.Coordinates[0]);
+                })
+                .ToArray();
 
-        cache.Set(cacheKey, results, TimeSpan.FromMinutes(30));
-        return results;
+            if (results.Length > 0)
+            {
+                cache.Set(cacheKey, results, TimeSpan.FromMinutes(30));
+                return results;
+            }
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            // Fall back to Nominatim below.
+        }
+
+        var nominatimResults = await SearchNominatimAsync(normalizedQuery, 5, cancellationToken);
+        var suggestions = nominatimResults.Select((place, index) => new AddressSuggestionResponse(
+            place.OsmId?.ToString(CultureInfo.InvariantCulture) ?? $"{place.Latitude}-{place.Longitude}-{index}",
+            place.DisplayName,
+            place.Latitude,
+            place.Longitude)).ToArray();
+
+        cache.Set(cacheKey, suggestions, TimeSpan.FromMinutes(30));
+        return suggestions;
     }
 
     public async Task<GeocodeResponse?> GeocodeAsync(string address, CancellationToken cancellationToken)
@@ -78,16 +99,43 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         var cacheKey = $"map:geocode:{normalizedAddress.ToLowerInvariant()}";
         if (cache.TryGetValue(cacheKey, out GeocodeResponse? cached)) return cached;
 
-        var uri = $"api?{BuildQuery(new Dictionary<string, string?>
+        GeocodeResponse? response = null;
+        foreach (var query in BuildAddressQueries(normalizedAddress))
         {
-            ["q"] = normalizedAddress,
-            ["limit"] = "5"
-        })}";
-        var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
-        var first = payload.Features.FirstOrDefault(feature =>
-            feature.Geometry.Coordinates.Count >= 2 && IsVietnam(feature.Properties.Country));
-        var response = first is null ? null : new GeocodeResponse(
-            first.Geometry.Coordinates[1], first.Geometry.Coordinates[0], FormatPhotonAddress(first.Properties));
+            try
+            {
+                var uri = $"api?{BuildQuery(new Dictionary<string, string?>
+                {
+                    ["q"] = query,
+                    ["limit"] = "5"
+                })}";
+                var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
+                var first = payload.Features.FirstOrDefault(feature =>
+                    feature.Geometry.Coordinates.Count >= 2 && IsVietnam(feature.Properties.Country));
+                if (first is not null)
+                {
+                    response = new GeocodeResponse(
+                        first.Geometry.Coordinates[1], first.Geometry.Coordinates[0], FormatPhotonAddress(first.Properties));
+                    break;
+                }
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                // Try the next variant/provider.
+            }
+        }
+
+        if (response is null)
+        {
+            foreach (var query in BuildAddressQueries(normalizedAddress))
+            {
+                var first = (await SearchNominatimAsync(query, 1, cancellationToken)).FirstOrDefault();
+                if (first is null) continue;
+                response = new GeocodeResponse(first.Latitude, first.Longitude, first.DisplayName);
+                break;
+            }
+        }
+
         cache.Set(cacheKey, response, response is null ? TimeSpan.FromMinutes(5) : TimeSpan.FromHours(24));
         return response;
     }
@@ -97,14 +145,36 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         var cacheKey = $"map:reverse:{Round(latitude)}:{Round(longitude)}";
         if (cache.TryGetValue(cacheKey, out string? cached)) return cached;
 
-        var uri = $"reverse?{BuildQuery(new Dictionary<string, string?>
+        try
         {
+            var uri = $"reverse?{BuildQuery(new Dictionary<string, string?>
+            {
+                ["lat"] = latitude.ToString(CultureInfo.InvariantCulture),
+                ["lon"] = longitude.ToString(CultureInfo.InvariantCulture)
+            })}";
+            var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
+            var result = payload.Features.FirstOrDefault();
+            var photonAddress = result is null ? null : FormatPhotonAddress(result.Properties);
+            if (!string.IsNullOrWhiteSpace(photonAddress))
+            {
+                cache.Set(cacheKey, photonAddress, TimeSpan.FromHours(24));
+                return photonAddress;
+            }
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            // Fall back to Nominatim below.
+        }
+
+        var reverseUri = $"reverse?{BuildQuery(new Dictionary<string, string?>
+        {
+            ["format"] = "jsonv2",
             ["lat"] = latitude.ToString(CultureInfo.InvariantCulture),
-            ["lon"] = longitude.ToString(CultureInfo.InvariantCulture)
+            ["lon"] = longitude.ToString(CultureInfo.InvariantCulture),
+            ["accept-language"] = "vi"
         })}";
-        var payload = await GetJsonAsync<PhotonResponse>("Photon", uri, cancellationToken);
-        var result = payload.Features.FirstOrDefault();
-        var address = result is null ? null : FormatPhotonAddress(result.Properties);
+        var reverse = await GetJsonAsync<NominatimPlace>("Nominatim", reverseUri, cancellationToken);
+        var address = reverse.DisplayName;
         cache.Set(cacheKey, address, TimeSpan.FromHours(24));
         return address;
     }
@@ -236,6 +306,21 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
             ?? throw new HttpRequestException("The map provider returned an empty response.");
     }
 
+    private async Task<NominatimPlace[]> SearchNominatimAsync(string query, int limit, CancellationToken cancellationToken)
+    {
+        var uri = $"search?{BuildQuery(new Dictionary<string, string?>
+        {
+            ["format"] = "jsonv2",
+            ["addressdetails"] = "1",
+            ["countrycodes"] = "vn",
+            ["accept-language"] = "vi",
+            ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            ["q"] = query
+        })}";
+        var places = await GetJsonAsync<NominatimPlace[]>("Nominatim", uri, cancellationToken);
+        return places.Where(place => place.Latitude is >= -90 and <= 90 && place.Longitude is >= -180 and <= 180).ToArray();
+    }
+
     private static string BuildQuery(IEnumerable<KeyValuePair<string, string?>> values) => string.Join("&", values
         .Where(item => !string.IsNullOrWhiteSpace(item.Value))
         .Select(item => $"{Uri.EscapeDataString(item.Key)}={Uri.EscapeDataString(item.Value!)}"));
@@ -243,6 +328,42 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
     private static string Round(decimal? value) => value is null
         ? "none"
         : Math.Round(value.Value, 3).ToString(CultureInfo.InvariantCulture);
+
+    private static IReadOnlyCollection<string> BuildAddressQueries(string address)
+    {
+        var queries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string value)
+        {
+            var trimmed = value.Trim(' ', ',');
+            if (!string.IsNullOrWhiteSpace(trimmed)) queries.Add(trimmed);
+        }
+
+        Add(address);
+        Add($"{address}, Việt Nam");
+        Add($"{address}, Vietnam");
+        Add(address
+            .Replace("Tp. Hồ Chí Minh", "Ho Chi Minh City", StringComparison.OrdinalIgnoreCase)
+            .Replace("TP. Hồ Chí Minh", "Ho Chi Minh City", StringComparison.OrdinalIgnoreCase)
+            .Replace("TP Hồ Chí Minh", "Ho Chi Minh City", StringComparison.OrdinalIgnoreCase)
+            .Replace("Thành phố Hồ Chí Minh", "Ho Chi Minh City", StringComparison.OrdinalIgnoreCase)
+            .Replace("Hồ Chí Minh", "Ho Chi Minh City", StringComparison.OrdinalIgnoreCase));
+        Add(StripDiacritics(address));
+        Add($"{StripDiacritics(address)}, Vietnam");
+        return queries.ToArray();
+    }
+
+    private static string StripDiacritics(string value)
+    {
+        var normalized = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                builder.Append(character);
+        }
+
+        return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
 
     private static bool IsVietnam(string? country) => country is not null &&
         (country.Equals("Vietnam", StringComparison.OrdinalIgnoreCase) || country.Equals("Việt Nam", StringComparison.OrdinalIgnoreCase));
@@ -300,6 +421,12 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         OverpassCenter? Center,
         Dictionary<string, string>? Tags);
     private sealed record OverpassCenter(
+        [property: JsonPropertyName("lat")] decimal Latitude,
+        [property: JsonPropertyName("lon")] decimal Longitude);
+
+    private sealed record NominatimPlace(
+        [property: JsonPropertyName("display_name")] string DisplayName,
+        [property: JsonPropertyName("osm_id")] long? OsmId,
         [property: JsonPropertyName("lat")] decimal Latitude,
         [property: JsonPropertyName("lon")] decimal Longitude);
 }

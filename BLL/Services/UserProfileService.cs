@@ -29,4 +29,16 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
         await profiles.SaveChangesAsync(cancellationToken);
         return AuthService.ToResponse(profile.User);
     }
+
+    public async Task<UserResponse> UpdateLocationAsync(int userId, UpdateUserLocationRequest request, CancellationToken cancellationToken = default)
+    {
+        var profile = await profiles.Query().Include(x => x.User).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
+            ?? throw new ServiceException("User profile was not found.", 404);
+
+        profile.Latitude = request.Latitude;
+        profile.Longitude = request.Longitude;
+        profile.User.UpdatedAt = DateTime.UtcNow;
+        await profiles.SaveChangesAsync(cancellationToken);
+        return AuthService.ToResponse(profile.User);
+    }
 }

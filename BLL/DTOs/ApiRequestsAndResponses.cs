@@ -13,7 +13,7 @@ public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Requ
 public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
-public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, string? HealthGoal, int? DietTypeId, bool IsActive);
+public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, string? HealthGoal, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
     string? Sex,
@@ -25,6 +25,9 @@ public record UpdateUserProfileRequest(
     int? DietTypeId,
     [Range(-90, 90)] decimal? Latitude,
     [Range(-180, 180)] decimal? Longitude);
+public record UpdateUserLocationRequest(
+    [Range(-90, 90)] decimal Latitude,
+    [Range(-180, 180)] decimal Longitude);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
@@ -34,7 +37,7 @@ public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> 
 public record AllergenRequest([Required, MaxLength(150)] string Name);
 public record TagRequest([Required, MaxLength(100)] string Name);
 public record CatalogItemResponse(int Id, string Name, string? Type = null);
-public record ProvinceResponse(string Code, string Name, string Type, decimal Latitude, decimal Longitude);
+public record ProvinceResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
 public record AreaResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
 public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, List<string>? Foods);
 public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, IReadOnlyCollection<string> Foods);

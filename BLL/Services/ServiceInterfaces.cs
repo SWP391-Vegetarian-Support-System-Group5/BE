@@ -43,6 +43,13 @@ public interface IUserAllergenService
 public interface IUserProfileService
 {
     Task<UserResponse> UpdateAsync(int userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
+    Task<UserResponse> UpdateLocationAsync(int userId, UpdateUserLocationRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface ILocationService
+{
+    IReadOnlyCollection<ProvinceResponse> GetProvinces();
+    IReadOnlyCollection<AreaResponse>? GetAreas(string provinceCode);
 }
 
 public interface IReferenceDataAndRestaurantService
@@ -68,12 +75,6 @@ public interface IReferenceDataAndRestaurantService
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
     Task<RestaurantReviewResponse> CreateRestaurantReviewAsync(int restaurantId, int userId, RestaurantReviewRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantReviewResponse>> GetRestaurantReviewsAsync(int restaurantId, CancellationToken cancellationToken = default);
-}
-
-public interface ILocationService
-{
-    IReadOnlyCollection<ProvinceResponse> GetProvinces();
-    IReadOnlyCollection<AreaResponse>? GetAreas(string provinceCode);
 }
 
 public interface IPostService

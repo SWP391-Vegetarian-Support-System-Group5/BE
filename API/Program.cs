@@ -19,7 +19,7 @@ const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
 
 if (!runDatabaseStartupTasks)
 {
-    // Location-only development mode must not depend on Windows Event Log or persisted keys.
+    // Database-disabled development mode must not depend on Windows Event Log or persisted keys.
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole();
     var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, ".local", "DataProtection-Keys"));
@@ -44,7 +44,13 @@ if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOp
 builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddMemoryCache();
-builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
+var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
+builder.Services.AddSingleton(geminiSettings);
+var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
+builder.Services.AddSingleton(sendGridSettings);
+builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));
+builder.Services.AddHttpClient("GeminiFiles", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/"));
+builder.Services.AddHttpClient("SendGrid", client => client.BaseAddress = new Uri("https://api.sendgrid.com/v3/"));
 builder.Services.AddHttpClient("Photon", client =>
 {
     client.BaseAddress = new Uri("https://photon.komoot.io/");
@@ -56,13 +62,13 @@ builder.Services.AddHttpClient("Overpass", client =>
     client.Timeout = TimeSpan.FromSeconds(12);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
 });
-var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
-builder.Services.AddSingleton(geminiSettings);
-var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
-builder.Services.AddSingleton(sendGridSettings);
-builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));
-builder.Services.AddHttpClient("GeminiFiles", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/"));
-builder.Services.AddHttpClient("SendGrid", client => client.BaseAddress = new Uri("https://api.sendgrid.com/v3/"));
+builder.Services.AddHttpClient("Nominatim", client =>
+{
+    client.BaseAddress = new Uri("https://nominatim.openstreetmap.org/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
+});
+builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>()));
 builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"), "uploads", "videos") });
 builder.Services.AddSingleton<LocalVideoStorage>();
