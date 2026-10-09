@@ -21,6 +21,15 @@ public class NutritionChatbotService(
     IKnowledgeBaseService knowledgeBaseService) : IChatService
 {
     private const int GuestMessageLimit = 5;
+    private static readonly IReadOnlyDictionary<string, string[]> AllergenAliases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Soy"] = ["soy", "soya", "đậu nành", "dau nanh", "đậu tương", "dau tuong", "sữa đậu nành", "sua dau nanh", "tofu", "đậu hũ", "dau hu", "tàu hũ", "tau hu", "nước tương", "nuoc tuong", "xì dầu", "xi dau", "miso", "tempeh", "edamame"],
+        ["Milk"] = ["milk", "dairy", "sữa", "sua", "sữa bò", "sua bo", "phô mai", "pho mai", "cheese", "bơ sữa", "bo sua", "butter", "cream", "kem", "yogurt", "yoghurt", "sữa chua", "sua chua", "whey", "casein"],
+        ["Egg"] = ["egg", "eggs", "trứng", "trung", "lòng đỏ", "long do", "lòng trắng", "long trang", "mayonnaise", "mayo"],
+        ["Peanut"] = ["peanut", "peanuts", "đậu phộng", "dau phong", "lạc", "lac", "bơ đậu phộng", "bo dau phong"],
+        ["Gluten"] = ["gluten", "wheat", "lúa mì", "lua mi", "bột mì", "bot mi", "mì căn", "mi can", "seitan", "barley", "đại mạch", "dai mach", "rye"],
+        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "hat cay", "almond", "hạnh nhân", "hanh nhan", "cashew", "hạt điều", "hat dieu", "walnut", "óc chó", "oc cho", "hazelnut", "pistachio", "macadamia"]
+    };
 
     public async Task<ChatSessionResponse> CreateSessionAsync(int? userId, CancellationToken cancellationToken = default)
     {
@@ -57,6 +66,16 @@ public class NutritionChatbotService(
         await messages.AddAsync(userMessage, cancellationToken);
         await messages.SaveChangesAsync(cancellationToken);
 
+        var userAllergenNames = await GetUserAllergenNamesAsync(userId, cancellationToken);
+        if (TryBuildAllergenConflictReply(request.Content, userAllergenNames, out var blockedReply))
+        {
+            var blockedResponse = new ChatMessage { ChatSessionId = id, Sender = "AI", Content = blockedReply, CreatedAt = VietnamTime.Now };
+            await messages.AddAsync(blockedResponse, cancellationToken);
+            await messages.SaveChangesAsync(cancellationToken);
+            int? remaining = session.UserId.HasValue ? null : GuestMessageLimit - guestMessageCount - 1;
+            return new(blockedResponse.ChatMessageId, blockedReply, [], [], remaining, false);
+        }
+
         var relatedRecipes = await GetRelatedRecipesAsync(userId, request.Content, cancellationToken);
         var knowledge = knowledgeBaseService.FindRelevant(request.Content);
         var context = await BuildApplicationContextAsync(userId, session.Messages, relatedRecipes, cancellationToken);
@@ -69,6 +88,61 @@ public class NutritionChatbotService(
         int? remainingMessages = session.UserId.HasValue ? null : GuestMessageLimit - guestMessageCount - 1;
         return new(response.ChatMessageId, chatbotReply.Answer, relatedRecipes, knowledge.Sources, remainingMessages, false);
     }
+
+    private async Task<IReadOnlyCollection<string>> GetUserAllergenNamesAsync(int? userId, CancellationToken cancellationToken)
+    {
+        if (!userId.HasValue) return [];
+        var user = await users.Query()
+            .Include(x => x.UserAllergens)
+            .ThenInclude(x => x.Allergen)
+            .SingleOrDefaultAsync(x => x.UserId == userId.Value, cancellationToken);
+        return user?.UserAllergens.Select(x => x.Allergen.Name).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+    }
+
+    private static bool TryBuildAllergenConflictReply(string message, IReadOnlyCollection<string> userAllergens, out string reply)
+    {
+        var normalizedMessage = NormalizeForMatch(message);
+        foreach (var allergen in userAllergens)
+        {
+            var aliases = GetAllergenAliases(allergen).Select(NormalizeForMatch).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
+            var matchedAlias = aliases.FirstOrDefault(alias => ContainsIngredientTerm(normalizedMessage, alias));
+            if (matchedAlias is null) continue;
+
+            reply = BuildAllergenConflictReply(allergen);
+            return true;
+        }
+
+        reply = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<string> GetAllergenAliases(string allergen)
+    {
+        yield return allergen;
+        if (AllergenAliases.TryGetValue(allergen, out var aliases))
+            foreach (var alias in aliases)
+                yield return alias;
+    }
+
+    private static bool ContainsIngredientTerm(string normalizedMessage, string normalizedAlias)
+    {
+        if (normalizedAlias.Length == 0) return false;
+        return Regex.IsMatch(normalizedMessage, $@"(^|[^\p{{L}}\p{{N}}]){Regex.Escape(normalizedAlias)}($|[^\p{{L}}\p{{N}}])", RegexOptions.IgnoreCase);
+    }
+
+    private static string NormalizeForMatch(string value)
+    {
+        var normalized = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var ch in normalized)
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
+                builder.Append(ch);
+        return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static string BuildAllergenConflictReply(string allergen) =>
+        $"Món này không phù hợp với hồ sơ dị ứng của bạn vì có liên quan đến {allergen}. Mình không thể hướng dẫn công thức chứa nguyên liệu đó.\n\nBạn có thể đổi sang món an toàn hơn như sữa yến mạch, sữa gạo, sữa dừa hoặc một món chay không dùng nhóm nguyên liệu gây dị ứng này. Nếu dị ứng nặng, nhớ kiểm tra nhãn nguyên liệu và hỏi chuyên gia y tế khi cần nhé.";
+
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(int? userId, string message, CancellationToken cancellationToken)
     {
         var user = userId.HasValue
@@ -99,10 +173,14 @@ public class NutritionChatbotService(
         var user = userId.HasValue
             ? await users.Query().Include("Profile.DietType").Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             : null;
-        var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.Profile?.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", user.UserAllergens.Select(x => x.Allergen.Name))}.";
+        var allergenNames = user?.UserAllergens.Select(x => x.Allergen.Name).ToArray() ?? [];
+        var allergenBlocklist = allergenNames.Length == 0
+            ? "None."
+            : string.Join("; ", allergenNames.Select(x => $"{x}: {string.Join(", ", GetAllergenAliases(x).Distinct(StringComparer.OrdinalIgnoreCase))}"));
+        var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.Profile?.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", allergenNames)}.";
         var recipeContext = relatedRecipes.Count == 0 ? "No matching recipes were found." : string.Join("\n", relatedRecipes.Select(x => $"- RecipeId {x.RecipeId}: {x.Title}"));
         var history = string.Join("\n", previousMessages.OrderByDescending(x => x.ChatMessageId).Take(10).Reverse().Select(x => $"{x.Sender}: {x.Content}"));
-        return $"USER PROFILE:\n{profile}\n\nSAFE RECIPE SUGGESTIONS:\n{recipeContext}\n\nRECENT CONVERSATION:\n{history}";
+        return $"USER PROFILE:\n{profile}\n\nSTRICT ALLERGEN BLOCKLIST:\n{allergenBlocklist}\n\nSAFE RECIPE SUGGESTIONS:\n{recipeContext}\n\nRECENT CONVERSATION:\n{history}";
     }
     private static ChatSessionResponse ToResponse(ChatSession x) => new(x.ChatSessionId, x.UserId, x.CreatedAt, x.Messages.OrderBy(m => m.ChatMessageId).Select(m => new ChatMessageResponse(m.ChatMessageId, m.Sender, m.Content, m.CreatedAt)).ToList());
     private static void EnsureAccess(ChatSession session, int? userId, string? role, string? guestAccessToken)
