@@ -43,8 +43,8 @@ public record PostResponse(int PostId, int UserId, string AuthorName, int? Categ
 public record CommentRequest([Required] string Content);
 public record CommentResponse(int CommentId, int PostId, int UserId, string AuthorName, int? ParentCommentId, string Content, string Status, IReadOnlyCollection<CommentResponse> Replies);
 public record RatingRequest([Range(1, 5)] int Rating);
-public record IngredientRequest([Required, MaxLength(200)] string IngredientName, string? Amount, [Required, MaxLength(30)] string DietaryGroup, int? AllergenId);
-public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber, [Required] string Instruction);
+public record IngredientRequest([Required, MaxLength(200)] string IngredientName,string? Amount = null, [Required, MaxLength(30)] string DietaryGroup = "PLANT", int? AllergenId = null);
+public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber = 1, [Required] string Instruction = "");
 public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, int? CategoryId, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, List<int>? TagIds);
 public record RecipeResponse(int PostId, string Title, string Content, string Status, decimal? Servings, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds);
 public record GenerateMealPlanRequest(DateTime? StartDate, string? AvailableIngredients);
@@ -62,5 +62,4 @@ public record UpdateVideoRecipeDraftRequest([Required, MaxLength(250)] string Ti
 public record PublishVideoRecipeDraftRequest(int? CategoryId, List<int>? TagIds);
 public record ReportRequest([Required, MaxLength(500)] string Reason);
 public record ModerationFlagResponse(int FlagId, int? PostId, int? CommentId, string Source, string? Reason, string Status, int? ReportedBy, int? ReviewedBy);
-public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
-    [Range(1, int.MaxValue)] int? EstimatedPrepMinutes,[Range(0.01, 1000)] decimal? Servings,int? CategoryId,[Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps);
+public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description, string? Transcript = null, [Range(1, int.MaxValue)] int? EstimatedPrepMinutes = null, [Range(0.01, 1000)] decimal? Servings = null, int? CategoryId = null, [Required] List<IngredientRequest>? Ingredients = null, [Required] List<RecipeStepRequest>? Steps = null);
