@@ -201,11 +201,11 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "READY") throw new ServiceException("Only a ready video draft can be edited.", 409);
-        ValidateDraftDetails(request.Title, request.Description, request.EstimatedPrepMinutes, request.Servings, request.CaloriesPerServing, request.ProteinPerServing, request.CarbsPerServing, request.FatPerServing, request.Ingredients, request.Steps);
+        ValidateDraftDetails(request.Title, request.Description, request.EstimatedPrepMinutes, request.Servings, request.CaloriesPerServing, request.Ingredients, request.Steps);
         await ValidateDraftCategoryAsync(request.CategoryId, ct);
         foreach (var item in draft.Ingredients) ingredients.Remove(item);
         foreach (var item in draft.Steps) steps.Remove(item);
-        draft.Title = request.Title.Trim(); draft.Description = request.Description.Trim(); draft.Transcript = request.Transcript?.Trim(); draft.EstimatedPrepMinutes = request.EstimatedPrepMinutes; draft.Servings = request.Servings; draft.CategoryId = request.CategoryId; draft.CaloriesPerServing = request.CaloriesPerServing; draft.ProteinPerServing = request.ProteinPerServing; draft.CarbsPerServing = request.CarbsPerServing; draft.FatPerServing = request.FatPerServing; draft.UpdatedAt = VietnamTime.Now;
+        draft.Title = request.Title.Trim(); draft.Description = request.Description.Trim(); draft.Transcript = request.Transcript?.Trim(); draft.EstimatedPrepMinutes = request.EstimatedPrepMinutes; draft.Servings = request.Servings; draft.CategoryId = request.CategoryId; draft.CaloriesPerServing = request.CaloriesPerServing; draft.UpdatedAt = VietnamTime.Now;
         foreach (var item in request.Ingredients) await ingredients.AddAsync(new VideoRecipeDraftIngredient { VideoRecipeDraftId = id, IngredientName = item.IngredientName.Trim(), Amount = item.Amount?.Trim(), DietaryGroup = VegetarianDietRules.NormalizeIngredientGroup(item.DietaryGroup), AllergenId = item.AllergenId }, ct);
         foreach (var item in request.Steps) await steps.AddAsync(new VideoRecipeDraftStep { VideoRecipeDraftId = id, StepNumber = item.StepNumber, Instruction = item.Instruction.Trim() }, ct);
         await drafts.SaveChangesAsync(ct);
@@ -227,7 +227,7 @@ public sealed class VideoRecipeDraftService(
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "READY") throw new ServiceException("Only a ready video draft can be published.", 409);
         var categoryId = request.CategoryId ?? draft.CategoryId;
-        var recipe = await recipes.CreateAsync(draft.UserId, new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, categoryId, draft.VideoUrl, draft.EstimatedPrepMinutes, null, draft.Servings, draft.CaloriesPerServing, draft.ProteinPerServing, draft.CarbsPerServing, draft.FatPerServing, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.TagIds), ct);
+        var recipe = await recipes.CreateAsync(draft.UserId, new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, categoryId, draft.VideoUrl, draft.EstimatedPrepMinutes, null, draft.Servings, draft.CaloriesPerServing, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.TagIds), ct);
         draft.Status = "PUBLISHED"; draft.UpdatedAt = VietnamTime.Now; await drafts.SaveChangesAsync(ct);
         return recipe;
     }
@@ -286,9 +286,6 @@ public sealed class VideoRecipeDraftService(
             Servings = request.Servings,
             CategoryId = request.CategoryId,
             CaloriesPerServing = request.CaloriesPerServing,
-            ProteinPerServing = request.ProteinPerServing,
-            CarbsPerServing = request.CarbsPerServing,
-            FatPerServing = request.FatPerServing,
             CreatedAt = VietnamTime.Now,
             UpdatedAt = VietnamTime.Now
         };
@@ -325,10 +322,10 @@ public sealed class VideoRecipeDraftService(
 
     private static void ValidateManualDraftRequest(CreateManualVideoRecipeDraftRequest request)
     {
-        ValidateDraftDetails(request.Title, request.Description, request.EstimatedPrepMinutes, request.Servings, request.CaloriesPerServing, request.ProteinPerServing, request.CarbsPerServing, request.FatPerServing, request.Ingredients, request.Steps);
+        ValidateDraftDetails(request.Title, request.Description, request.EstimatedPrepMinutes, request.Servings, request.CaloriesPerServing, request.Ingredients, request.Steps);
     }
 
-    private static void ValidateDraftDetails(string? title, string? description, int? estimatedPrepMinutes, decimal? servings, decimal? caloriesPerServing, decimal? proteinPerServing, decimal? carbsPerServing, decimal? fatPerServing, List<IngredientRequest>? ingredients, List<RecipeStepRequest>? steps)
+    private static void ValidateDraftDetails(string? title, string? description, int? estimatedPrepMinutes, decimal? servings, decimal? caloriesPerServing, List<IngredientRequest>? ingredients, List<RecipeStepRequest>? steps)
     {
         var errors = new List<string>();
 
@@ -342,8 +339,6 @@ public sealed class VideoRecipeDraftService(
             errors.Add("Servings must be greater than zero and no more than 1000.");
         if (caloriesPerServing is <= 0)
             errors.Add("CaloriesPerServing must be greater than zero.");
-        if (proteinPerServing is < 0 || carbsPerServing is < 0 || fatPerServing is < 0)
-            errors.Add("Nutrition macro values cannot be negative.");
 
         if (ingredients is not { Count: > 0 })
         {
@@ -396,5 +391,5 @@ public sealed class VideoRecipeDraftService(
             : throw new ServiceException("Video recipe draft was not found.", 404);
 
     private static string GetContentType(string videoUrl) => Path.GetExtension(videoUrl).ToLowerInvariant() switch { ".mp4" => "video/mp4", ".mov" => "video/quicktime", ".webm" => "video/webm", ".avi" => "video/avi", _ => "application/octet-stream" };
-    private static VideoRecipeDraftResponse ToResponse(VideoRecipeDraft x) => new(x.VideoRecipeDraftId, x.Status, x.VideoUrl, x.Title, x.Description, x.Transcript, x.EstimatedPrepMinutes, x.Servings, x.CategoryId, x.CaloriesPerServing, x.ProteinPerServing, x.CarbsPerServing, x.FatPerServing, x.Ingredients.OrderBy(i => i.VideoRecipeDraftIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.ErrorMessage, x.CreatedAt, x.UpdatedAt);
+    private static VideoRecipeDraftResponse ToResponse(VideoRecipeDraft x) => new(x.VideoRecipeDraftId, x.Status, x.VideoUrl, x.Title, x.Description, x.Transcript, x.EstimatedPrepMinutes, x.Servings, x.CategoryId, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.VideoRecipeDraftIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.ErrorMessage, x.CreatedAt, x.UpdatedAt);
 }

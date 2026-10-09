@@ -189,9 +189,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.PostId);
             entity.Property(x => x.Servings).HasPrecision(5, 2);
             entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.ProteinPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.CarbsPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.FatPerServing).HasPrecision(8, 2);
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
             entity.HasOne(x => x.Post).WithOne(x => x.Recipe).HasForeignKey<Recipe>(x => x.PostId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -313,9 +310,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Title).HasMaxLength(250);
             entity.Property(x => x.Servings).HasPrecision(5, 2);
             entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.ProteinPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.CarbsPerServing).HasPrecision(8, 2);
-            entity.Property(x => x.FatPerServing).HasPrecision(8, 2);
             entity.Property(x => x.ErrorMessage).HasMaxLength(1000);
             entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
             entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");

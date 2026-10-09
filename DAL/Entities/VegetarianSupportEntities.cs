@@ -120,9 +120,6 @@ public class Recipe
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
     public decimal? CaloriesPerServing { get; set; }
-    public decimal? ProteinPerServing { get; set; }
-    public decimal? CarbsPerServing { get; set; }
-    public decimal? FatPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
@@ -266,9 +263,6 @@ public class VideoRecipeDraft
     public decimal? Servings { get; set; }
     public int? CategoryId { get; set; }
     public decimal? CaloriesPerServing { get; set; }
-    public decimal? ProteinPerServing { get; set; }
-    public decimal? CarbsPerServing { get; set; }
-    public decimal? FatPerServing { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

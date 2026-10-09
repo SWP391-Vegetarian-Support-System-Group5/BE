@@ -47,16 +47,10 @@ public partial class AddNutritionPlanningFields : Migration
     private static void AddNutritionColumns(MigrationBuilder migrationBuilder, string table)
     {
         migrationBuilder.AddColumn<decimal>(name: "CaloriesPerServing", table: table, type: "decimal(8,2)", precision: 8, scale: 2, nullable: true);
-        migrationBuilder.AddColumn<decimal>(name: "ProteinPerServing", table: table, type: "decimal(8,2)", precision: 8, scale: 2, nullable: true);
-        migrationBuilder.AddColumn<decimal>(name: "CarbsPerServing", table: table, type: "decimal(8,2)", precision: 8, scale: 2, nullable: true);
-        migrationBuilder.AddColumn<decimal>(name: "FatPerServing", table: table, type: "decimal(8,2)", precision: 8, scale: 2, nullable: true);
     }
 
     private static void DropNutritionColumns(MigrationBuilder migrationBuilder, string table)
     {
         migrationBuilder.DropColumn(name: "CaloriesPerServing", table: table);
-        migrationBuilder.DropColumn(name: "ProteinPerServing", table: table);
-        migrationBuilder.DropColumn(name: "CarbsPerServing", table: table);
-        migrationBuilder.DropColumn(name: "FatPerServing", table: table);
     }
 }
