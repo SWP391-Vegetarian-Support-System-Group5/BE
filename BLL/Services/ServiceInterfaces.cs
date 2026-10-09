@@ -4,9 +4,26 @@ namespace BLL.Services;
 
 public interface IAuthService
 {
-    Task<UserResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    Task<EmailOtpSentResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default);
+    Task VerifyRegistrationOtpAsync(VerifyEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task<EmailOtpSentResponse> ResendRegistrationOtpAsync(RequestEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task RequestPasswordResetAsync(RequestEmailOtpRequest request, CancellationToken cancellationToken = default);
+    Task ResetPasswordAsync(ResetPasswordWithOtpRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse> ValidateCredentialsAsync(LoginRequest request, CancellationToken cancellationToken = default);
     Task<UserResponse?> GetUserAsync(int userId, CancellationToken cancellationToken = default);
+    Task<UserResponse> GetUserByEmailAsync(string email, CancellationToken cancellationToken = default);
+}
+
+public interface IEmailSender
+{
+    Task SendOtpAsync(string recipientEmail, string purpose, string otpCode, CancellationToken cancellationToken = default);
+}
+
+public sealed class SendGridSettings
+{
+    public string? ApiKey { get; init; }
+    public string? FromEmail { get; init; }
+    public string FromName { get; init; } = "Vegetarian Support System";
 }
 
 public interface IUserAdministrationService
@@ -21,6 +38,18 @@ public interface IUserAllergenService
 {
     Task<UserAllergensResponse> GetAsync(int userId, CancellationToken cancellationToken = default);
     Task<UserAllergensResponse> UpdateAsync(int userId, UpdateUserAllergensRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface IUserProfileService
+{
+    Task<UserResponse> UpdateAsync(int userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
+    Task<UserResponse> UpdateLocationAsync(int userId, UpdateUserLocationRequest request, CancellationToken cancellationToken = default);
+}
+
+public interface ILocationService
+{
+    IReadOnlyCollection<ProvinceResponse> GetProvinces();
+    IReadOnlyCollection<AreaResponse>? GetAreas(string provinceCode);
 }
 
 public interface IReferenceDataAndRestaurantService
@@ -109,6 +138,7 @@ public interface IVideoRecipeDraftService
     Task<RecipeResponse> PublishAsync(int id, int userId, string role, PublishVideoRecipeDraftRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default);
     Task ProcessPendingAsync(CancellationToken cancellationToken = default);
+    Task<VideoRecipeDraftResponse> CreateManualAsync(int userId, Stream videoStream, string fileName, string contentType, CreateManualVideoRecipeDraftRequest request, CancellationToken ct = default);
 }
 public interface IModerationAiService { Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default); }
 

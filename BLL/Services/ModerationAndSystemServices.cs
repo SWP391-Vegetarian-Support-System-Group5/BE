@@ -40,7 +40,7 @@ public class SeedService(IRepository<DietType> dietTypes, IRepository<Category> 
         if (!await users.Query().AnyAsync(x => x.Email == "admin@vegetarian.local", cancellationToken))
         {
             var now = DateTime.UtcNow;
-            await users.AddAsync(new User { Email = "admin@vegetarian.local", PasswordHash = PasswordHasher.Hash("Admin@123"), Role = "ADMIN", FullName = "System Administrator", CreatedAt = now, UpdatedAt = now, IsActive = true }, cancellationToken);
+            await users.AddAsync(new User { Email = "admin@vegetarian.local", PasswordHash = PasswordHasher.Hash("Admin@123"), Role = "ADMIN", Profile = new UserProfile { FullName = "System Administrator" }, CreatedAt = now, UpdatedAt = now, IsActive = true, IsEmailVerified = true }, cancellationToken);
             await users.SaveChangesAsync(cancellationToken);
         }
     }

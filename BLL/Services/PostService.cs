@@ -69,7 +69,7 @@ public class PostService(
         var comment = new Comment { PostId = postId, UserId = userId, ParentCommentId = parentCommentId, Content = request.Content.Trim(), Status = "PUBLISHED" };
         await comments.AddAsync(comment, cancellationToken); await comments.SaveChangesAsync(cancellationToken);
         await CreateAiCommentFlagAsync(comment.CommentId, comment.Content, cancellationToken);
-        var created = await comments.Query().Include(x => x.User).SingleAsync(x => x.CommentId == comment.CommentId, cancellationToken);
+        var created = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).SingleAsync(x => x.CommentId == comment.CommentId, cancellationToken);
         return ToCommentResponse(created, []);
     }
 
@@ -82,13 +82,13 @@ public class PostService(
     public async Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default)
     {
         if (!await posts.Query().AnyAsync(x => x.PostId == postId && x.Status == "PUBLISHED", cancellationToken)) throw new ServiceException("Post was not found.", 404);
-        var items = await comments.Query().Include(x => x.User).Where(x => x.PostId == postId && x.Status == "PUBLISHED").OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
+        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).Where(x => x.PostId == postId && x.Status == "PUBLISHED").OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
         return items.Where(x => x.ParentCommentId is null).Select(x => ToCommentTree(x, items)).ToList();
     }
 
     public async Task<IReadOnlyCollection<CommentResponse>> GetAllCommentsAsync(CancellationToken cancellationToken = default)
     {
-        var items = await comments.Query().Include(x => x.User).OrderByDescending(x => x.CommentId).ToListAsync(cancellationToken);
+        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).OrderByDescending(x => x.CommentId).ToListAsync(cancellationToken);
         return items.Select(x => ToCommentResponse(x, [])).ToList();
     }
 
@@ -136,7 +136,7 @@ public class PostService(
     public async Task<IReadOnlyCollection<PostResponse>> GetBookmarksAsync(int userId, CancellationToken cancellationToken = default) =>
         (await BaseQuery().Where(x => x.Bookmarks.Any(b => b.UserId == userId)).ToListAsync(cancellationToken)).Select(ToResponse).ToList();
 
-    private IQueryable<Post> BaseQuery() => posts.Query().Include(x => x.User).Include(x => x.Category).Include(x => x.PostTags).ThenInclude(x => x.Tag).Include(x => x.Ratings);
+    private IQueryable<Post> BaseQuery() => posts.Query().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Category).Include(x => x.PostTags).ThenInclude(x => x.Tag).Include(x => x.Ratings);
     private async Task SetTagsAsync(Post post, List<int>? tagIds, CancellationToken ct)
     {
         var ids = (tagIds ?? []).Distinct().ToHashSet();
@@ -151,9 +151,9 @@ public class PostService(
         var ids = (tagIds ?? []).Distinct().ToHashSet();
         if (ids.Count > 0 && await tags.Query().CountAsync(x => ids.Contains(x.TagId), ct) != ids.Count) throw new ServiceException("One or more tags were not found.", 404);
     }
-    private static PostResponse ToResponse(Post x) => new(x.PostId, x.UserId, x.User.FullName, x.CategoryId, x.Category?.Name, x.Title, x.Content, x.PostType, x.VideoUrl, x.Status, x.PostTags.Select(pt => pt.Tag.Name).ToList(), x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating));
+    private static PostResponse ToResponse(Post x) => new(x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.CategoryId, x.Category?.Name, x.Title, x.Content, x.PostType, x.VideoUrl, x.Status, x.PostTags.Select(pt => pt.Tag.Name).ToList(), x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating));
     private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
-    private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.FullName, x.ParentCommentId, x.Content, x.Status, replies);
+    private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies);
     private static void EnsureOwner(int ownerId, int actorId, string role) { if (ownerId != actorId && role != "ADMIN") throw new ServiceException("You do not have permission to modify this content.", 403); }
     private async Task CreateAiPostFlagAsync(int postId, string content, CancellationToken ct)
     {

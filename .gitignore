@@ -4,3 +4,6 @@
 *.user
 *.suo
 *.env
+.env
+**/.env
+.local/

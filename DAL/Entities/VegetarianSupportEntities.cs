@@ -6,27 +6,50 @@ public class User
     public string Email { get; set; } = null!;
     public string PasswordHash { get; set; } = null!;
     public string Role { get; set; } = "USER";
-    public string FullName { get; set; } = null!;
-    public string? Sex { get; set; }
-    public decimal? HeightCm { get; set; }
-    public decimal? WeightKg { get; set; }
-    public int? DietTypeId { get; set; }
-    public decimal? Latitude { get; set; }
-    public decimal? Longitude { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public bool IsActive { get; set; }
-    public DietType? DietType { get; set; }
+    public bool IsEmailVerified { get; set; } = true;
+    public UserProfile? Profile { get; set; }
     public ICollection<Post> Posts { get; set; } = new List<Post>();
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
+}
+
+public class UserProfile
+{
+    public int UserId { get; set; }
+    public string FullName { get; set; } = null!;
+    public string? Sex { get; set; }
+    public DateTime? BirthDate { get; set; }
+    public decimal? HeightCm { get; set; }
+    public decimal? WeightKg { get; set; }
+    public string? ActivityLevel { get; set; }
+    public string? HealthGoal { get; set; }
+    public int? DietTypeId { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    public User User { get; set; } = null!;
+    public DietType? DietType { get; set; }
+}
+
+public class EmailOtpCode
+{
+    public int EmailOtpCodeId { get; set; }
+    public string Email { get; set; } = null!;
+    public string Purpose { get; set; } = null!;
+    public string CodeHash { get; set; } = null!;
+    public DateTime ExpiresAt { get; set; }
+    public int FailedAttempts { get; set; }
+    public DateTime? UsedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class DietType
 {
     public int DietTypeId { get; set; }
     public string Name { get; set; } = null!;
-    public ICollection<User> Users { get; set; } = new List<User>();
+    public ICollection<UserProfile> UserProfiles { get; set; } = new List<UserProfile>();
     public ICollection<Restaurant> Restaurants { get; set; } = new List<Restaurant>();
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
 }
@@ -96,6 +119,7 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
@@ -184,6 +208,11 @@ public class MealPlan
     public int UserId { get; set; }
     public DateTime StartDate { get; set; }
     public string? AvailableIngredients { get; set; }
+    public decimal? BMI { get; set; }
+    public decimal? BMR { get; set; }
+    public decimal? TDEE { get; set; }
+    public decimal? TargetCaloriesPerDay { get; set; }
+    public string? HealthGoal { get; set; }
     public User User { get; set; } = null!;
     public ICollection<MealPlanMeal> Meals { get; set; } = new List<MealPlanMeal>();
 }
@@ -195,6 +224,7 @@ public class MealPlanMeal
     public int DayNumber { get; set; }
     public string MealType { get; set; } = null!;
     public int RecipeId { get; set; }
+    public decimal? PlannedCalories { get; set; }
     public MealPlan MealPlan { get; set; } = null!;
     public Recipe Recipe { get; set; } = null!;
 }
@@ -230,10 +260,14 @@ public class VideoRecipeDraft
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }
+    public decimal? Servings { get; set; }
+    public int? CategoryId { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public User User { get; set; } = null!;
+    public Category? Category { get; set; }
     public ICollection<VideoRecipeDraftIngredient> Ingredients { get; set; } = new List<VideoRecipeDraftIngredient>();
     public ICollection<VideoRecipeDraftStep> Steps { get; set; } = new List<VideoRecipeDraftStep>();
 }

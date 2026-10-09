@@ -1,4 +1,4 @@
-using API.Infrastructure;
+﻿using API.Infrastructure;
 using BLL.DTOs;
 using BLL.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -26,6 +26,51 @@ public class VideoRecipeDraftsController(IVideoRecipeDraftService videoRecipeDra
         await using var stream = video.OpenReadStream();
         var draft = await videoRecipeDraftService.CreateAsync(User.GetRequiredUserId(), stream, video.FileName, contentType, ct);
         return AcceptedAtAction(nameof(GetById), new { id = draft.VideoRecipeDraftId }, draft);
+    }
+
+
+    [HttpPost("manual")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<VideoRecipeDraftResponse>> CreateManual(
+    IFormFile video,
+    [FromForm] string requestJson,
+    CancellationToken ct)
+    {
+        if (video == null || video.Length == 0)
+            return BadRequest(new { success = false, message = "Video is required." });
+
+        if (video.Length > settings.MaximumFileSizeBytes)
+            return BadRequest(new { success = false, message = "Video must be 100 MB or smaller." });
+
+        if (!VideoTypes.TryGetValue(Path.GetExtension(video.FileName), out var contentType))
+            return BadRequest(new { success = false, message = "Use an MP4, MOV, WEBM, or AVI video." });
+
+        CreateManualVideoRecipeDraftRequest request;
+        try
+        {
+            request = System.Text.Json.JsonSerializer.Deserialize<CreateManualVideoRecipeDraftRequest>(
+                requestJson,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? throw new Exception();
+        }
+        catch
+        {
+            return BadRequest(new { success = false, message = "The JSON format in requestJson is invalid." });
+        }
+
+        if (!TryValidateModel(request))
+            return ValidationProblem(ModelState);
+
+        await using var stream = video.OpenReadStream();
+        var draft = await videoRecipeDraftService.CreateManualAsync(
+            User.GetRequiredUserId(),
+            stream,
+            video.FileName,
+            contentType,
+            request,
+            ct);
+
+        return CreatedAtAction(nameof(GetById), new { id = draft.VideoRecipeDraftId }, draft);
     }
 
     [HttpGet("{id:int}")]
