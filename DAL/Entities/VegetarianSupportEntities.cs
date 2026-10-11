@@ -71,6 +71,7 @@ public class Post
     public string Content { get; set; } = null!;
     public string PostType { get; set; } = null!;
     public string? VideoUrl { get; set; }
+    public string? ThumbnailUrl { get; set; }
     public string Status { get; set; } = "DRAFT";
     public User User { get; set; } = null!;
     public Category? Category { get; set; }

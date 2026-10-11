@@ -22,9 +22,10 @@ public class RecipeService(
     {
         ValidateRecipeRequest(request);
         await ValidateRelationsAsync(request, cancellationToken);
-        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = request.VideoUrl?.Trim(), Status = "PUBLISHED" };
+        var videoUrl = request.VideoUrl?.Trim();
+        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PUBLISHED" };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
-        var recipe = new Recipe { PostId = post.PostId, PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = request.VideoUrl?.Trim() };
+        var recipe = new Recipe { PostId = post.PostId, PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl };
         await recipes.AddAsync(recipe, cancellationToken);
         await ReplaceDetailsAsync(recipe.PostId, request, cancellationToken);
         await recipes.SaveChangesAsync(cancellationToken);
@@ -44,8 +45,9 @@ public class RecipeService(
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         await ValidateRelationsAsync(request, cancellationToken);
-        recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.CategoryId = request.CategoryId; recipe.Post.VideoUrl = request.VideoUrl?.Trim();
-        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = request.VideoUrl?.Trim();
+        var videoUrl = request.VideoUrl?.Trim();
+        recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.CategoryId = request.CategoryId; recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl);
+        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl;
         foreach (var item in recipe.Ingredients) ingredients.Remove(item);
         foreach (var item in recipe.Steps) steps.Remove(item);
         foreach (var item in recipe.DietCompatibilities) dietCompatibilities.Remove(item);
@@ -95,7 +97,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.Servings, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList());
+    private static RecipeResponse ToResponse(Recipe x) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList());
     private static void ValidateRecipeRequest(CreateRecipeRequest request)
     {
         if ((request.Steps ?? []).GroupBy(x => x.StepNumber).Any(g => g.Count() > 1)) throw new ServiceException("Recipe step numbers must be unique.");

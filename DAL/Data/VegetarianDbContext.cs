@@ -131,6 +131,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Content).IsRequired();
             entity.Property(x => x.PostType).HasMaxLength(30).IsUnicode(false).IsRequired();
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
+            entity.Property(x => x.ThumbnailUrl).HasMaxLength(1000).IsUnicode(false);
             entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.HasOne(x => x.User).WithMany(x => x.Posts).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Category).WithMany(x => x.Posts).HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);

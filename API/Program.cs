@@ -46,6 +46,8 @@ builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddMemoryCache();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
+var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
+builder.Services.AddSingleton(cloudinarySettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
 builder.Services.AddSingleton(sendGridSettings);
 builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));
@@ -70,7 +72,7 @@ builder.Services.AddHttpClient("Nominatim", client =>
 });
 builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>()));
-builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot"), "uploads", "videos") });
+builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing") });
 builder.Services.AddSingleton<LocalVideoStorage>();
 builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>()));
 if (runDatabaseStartupTasks) builder.Services.AddHostedService<VideoRecipeProcessingWorker>();

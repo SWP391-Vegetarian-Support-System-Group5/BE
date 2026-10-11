@@ -2,6 +2,8 @@
 using System.Text.Json;
 using BLL.Common;
 using BLL.DTOs;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 using DAL.Entities;
 using DAL.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -11,8 +13,21 @@ namespace BLL.Services;
 
 public sealed class VideoRecipeSettings
 {
-    public string StorageDirectory { get; init; } = Path.Combine(AppContext.BaseDirectory, "wwwroot", "uploads", "videos");
+    public string StorageDirectory { get; init; } = Path.Combine(AppContext.BaseDirectory, ".local", "video-processing");
     public long MaximumFileSizeBytes { get; init; } = 100 * 1024 * 1024;
+}
+
+public sealed class CloudinarySettings
+{
+    public string CloudName { get; init; } = string.Empty;
+    public string ApiKey { get; init; } = string.Empty;
+    public string ApiSecret { get; init; } = string.Empty;
+    public string VideoFolder { get; init; } = "veggiemate/videos";
+
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(CloudName)
+        && !string.IsNullOrWhiteSpace(ApiKey)
+        && !string.IsNullOrWhiteSpace(ApiSecret);
 }
 
 public interface IVideoRecipeAnalyzer
@@ -22,30 +37,79 @@ public interface IVideoRecipeAnalyzer
 
 public sealed record GeneratedVideoRecipe(string Title, string Description, string Transcript, int? EstimatedPrepMinutes, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, string GeminiFileName);
 
-public sealed class LocalVideoStorage(VideoRecipeSettings settings)
+public sealed class LocalVideoStorage(VideoRecipeSettings settings, CloudinarySettings cloudinarySettings)
 {
+    private static readonly HttpClient DownloadClient = new();
+    private readonly Cloudinary? cloudinary = cloudinarySettings.IsConfigured
+        ? new Cloudinary(new Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret))
+        : null;
+
     public async Task<string> SaveAsync(Stream video, string fileName, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(settings.StorageDirectory);
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        var storedName = $"{Guid.NewGuid():N}{extension}";
-        await using var destination = File.Create(Path.Combine(settings.StorageDirectory, storedName));
-        await video.CopyToAsync(destination, cancellationToken);
-        return $"/uploads/videos/{storedName}";
+        var publicId = Guid.NewGuid().ToString("N");
+        var storedName = $"{publicId}{extension}";
+        var localPath = Path.Combine(settings.StorageDirectory, storedName);
+        await using (var destination = File.Create(localPath))
+        {
+            await video.CopyToAsync(destination, cancellationToken);
+        }
+
+        if (cloudinary is null)
+            throw new ServiceException("Cloudinary is not configured. Set Cloudinary:CloudName, Cloudinary:ApiKey, and Cloudinary:ApiSecret before uploading videos.", 503);
+
+        var upload = await cloudinary.UploadAsync(new VideoUploadParams
+        {
+            File = new FileDescription(localPath),
+            Folder = cloudinarySettings.VideoFolder,
+            PublicId = publicId,
+            Overwrite = false,
+            UseFilename = false,
+            UniqueFilename = false
+        });
+
+        if (upload.Error is not null)
+            throw new ServiceException("Cloudinary could not upload the video.", 503, [upload.Error.Message]);
+
+        if (upload.SecureUrl is null)
+            throw new ServiceException("Cloudinary did not return a secure video URL.", 503);
+
+        return upload.SecureUrl.ToString();
     }
 
-    public string GetPath(string videoUrl) => Path.Combine(settings.StorageDirectory, Path.GetFileName(videoUrl));
+    public string GetPath(string videoUrl) => Path.Combine(settings.StorageDirectory, GetStoredFileName(videoUrl));
+
+    public async Task<string> PrepareForProcessingAsync(string videoUrl, CancellationToken cancellationToken)
+    {
+        var path = GetPath(videoUrl);
+        if (File.Exists(path)) return path;
+
+        if (!Uri.TryCreate(videoUrl, UriKind.Absolute, out var uri))
+            throw new ServiceException("The original video file is no longer available.", 409);
+
+        Directory.CreateDirectory(settings.StorageDirectory);
+        await using var source = await DownloadClient.GetStreamAsync(uri, cancellationToken);
+        await using var destination = File.Create(path);
+        await source.CopyToAsync(destination, cancellationToken);
+        return path;
+    }
 
     public void Delete(string videoUrl)
     {
         var path = GetPath(videoUrl);
         if (File.Exists(path)) File.Delete(path);
     }
+
+    private static string GetStoredFileName(string videoUrl) =>
+        Uri.TryCreate(videoUrl, UriKind.Absolute, out var uri)
+            ? Path.GetFileName(uri.AbsolutePath)
+            : Path.GetFileName(videoUrl);
 }
 
 public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatbotSettings settings) : IVideoRecipeAnalyzer
 {
-    private const string RecipePrompt = "Analyze this cooking video. Return only valid JSON. Write Vietnamese text. Create a concise recipe from what is explicitly shown or said. Do not invent ingredients or quantities. Classify every ingredient as exactly one of PLANT, DAIRY, EGG, HONEY. If the video contains meat, poultry, fish, shellfish, animal broth, gelatin, or an unclear non-vegetarian ingredient, return it in warnings and do not include it as a recipe ingredient. transcript must capture the spoken cooking instructions. title, description, transcript, ingredients, and steps are required.";
+    private const string RecipePrompt = "Analyze this cooking video. Return only valid JSON. Write Vietnamese text. Create a concise recipe from what is explicitly shown or said. Do not invent ingredients or quantities. Classify every ingredient as exactly one of PLANT, DAIRY, EGG, HONEY. If the video contains meat, poultry, fish, shellfish, animal broth, gelatin, or an unclear non-vegetarian ingredient, return it in warnings and do not include it as a recipe ingredient. Keep transcript as a short spoken-instruction summary only, maximum 3 sentences. title, description, ingredients, and steps are required.";
 
     public async Task<GeneratedVideoRecipe> AnalyzeAsync(string videoPath, string contentType, CancellationToken cancellationToken = default)
     {
@@ -66,7 +130,7 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
     private async Task<GeminiFile> UploadAsync(string videoPath, string contentType, CancellationToken ct)
     {
         var length = new FileInfo(videoPath).Length;
-        using var start = new HttpRequestMessage(HttpMethod.Post, "upload/v1beta/files");
+        using var start = new HttpRequestMessage(System.Net.Http.HttpMethod.Post, "upload/v1beta/files");
         start.Headers.Add("x-goog-api-key", settings.ApiKey);
         start.Headers.Add("X-Goog-Upload-Protocol", "resumable");
         start.Headers.Add("X-Goog-Upload-Command", "start");
@@ -80,7 +144,7 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
         if (string.IsNullOrWhiteSpace(uploadUrl)) throw new ServiceException("Gemini did not return an upload URL.", 503);
 
         await using var stream = File.OpenRead(videoPath);
-        using var upload = new HttpRequestMessage(HttpMethod.Post, uploadUrl);
+        using var upload = new HttpRequestMessage(System.Net.Http.HttpMethod.Post, uploadUrl);
         upload.Headers.Add("X-Goog-Upload-Offset", "0");
         upload.Headers.Add("X-Goog-Upload-Command", "upload, finalize");
         upload.Content = new StreamContent(stream);
@@ -93,9 +157,9 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
 
     private async Task<GeminiFile> WaitUntilActiveAsync(string name, CancellationToken ct)
     {
-        for (var attempt = 0; attempt < 120; attempt++)
+        for (var attempt = 0; attempt < 180; attempt++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"v1beta/{name}");
+            using var request = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, $"v1beta/{name}");
             request.Headers.Add("x-goog-api-key", settings.ApiKey);
             using var response = await httpClient.SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -103,14 +167,14 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
             var file = ReadFile(body);
             if (string.Equals(file.State, "ACTIVE", StringComparison.OrdinalIgnoreCase)) return file;
             if (string.Equals(file.State, "FAILED", StringComparison.OrdinalIgnoreCase)) throw new ServiceException("Gemini could not process this video.", 503, [body]);
-            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
         throw new ServiceException("Gemini took too long to process the video. Please try a shorter video.", 503);
     }
 
     private async Task<GeneratedVideoRecipe> GenerateAsync(string fileUri, string mimeType, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"v1beta/models/{settings.Model}:generateContent");
+        using var request = new HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"v1beta/models/{settings.Model}:generateContent");
         request.Headers.Add("x-goog-api-key", settings.ApiKey);
         request.Content = JsonContent.Create(new
         {
@@ -118,6 +182,7 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
             generationConfig = new
             {
                 responseMimeType = "application/json",
+                maxOutputTokens = 1600,
                 responseSchema = new
                 {
                     type = "OBJECT",
@@ -127,7 +192,7 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
                         ingredients = new { type = "ARRAY", items = new { type = "OBJECT", properties = new { ingredientName = new { type = "STRING" }, amount = new { type = "STRING", nullable = true }, dietaryGroup = new { type = "STRING" } }, required = new[] { "ingredientName", "dietaryGroup" } } },
                         steps = new { type = "ARRAY", items = new { type = "OBJECT", properties = new { stepNumber = new { type = "INTEGER" }, instruction = new { type = "STRING" } }, required = new[] { "stepNumber", "instruction" } } }
                     },
-                    required = new[] { "title", "description", "transcript", "ingredients", "steps" }
+                    required = new[] { "title", "description", "ingredients", "steps" }
                 }
             }
         });
@@ -142,12 +207,15 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
         var ingredients = root.GetProperty("ingredients").EnumerateArray().Select(x => new IngredientRequest(x.GetProperty("ingredientName").GetString() ?? string.Empty, x.TryGetProperty("amount", out var amount) && amount.ValueKind != JsonValueKind.Null ? amount.GetString() : null, VegetarianDietRules.NormalizeIngredientGroup(x.GetProperty("dietaryGroup").GetString() ?? string.Empty), null)).ToList();
         var steps = root.GetProperty("steps").EnumerateArray().Select((x, index) => new RecipeStepRequest(x.TryGetProperty("stepNumber", out var number) ? number.GetInt32() : index + 1, x.GetProperty("instruction").GetString() ?? string.Empty)).ToList();
         if (ingredients.Count == 0 || steps.Count == 0) throw new ServiceException("Gemini did not identify enough recipe details. Please use a clearer cooking video.", 422);
-        return new(root.GetProperty("title").GetString() ?? "Video recipe", root.GetProperty("description").GetString() ?? string.Empty, root.GetProperty("transcript").GetString() ?? string.Empty, root.TryGetProperty("estimatedPrepMinutes", out var minutes) && minutes.ValueKind == JsonValueKind.Number ? minutes.GetInt32() : null, ingredients, steps, string.Empty);
+        var transcript = root.TryGetProperty("transcript", out var transcriptElement) && transcriptElement.ValueKind == JsonValueKind.String
+            ? transcriptElement.GetString() ?? string.Empty
+            : string.Empty;
+        return new(root.GetProperty("title").GetString() ?? "Video recipe", root.GetProperty("description").GetString() ?? string.Empty, transcript, root.TryGetProperty("estimatedPrepMinutes", out var minutes) && minutes.ValueKind == JsonValueKind.Number ? minutes.GetInt32() : null, ingredients, steps, string.Empty);
     }
 
     private async Task DeleteGeminiFileAsync(string name, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Delete, $"v1beta/{name}");
+        using var request = new HttpRequestMessage(System.Net.Http.HttpMethod.Delete, $"v1beta/{name}");
         request.Headers.Add("x-goog-api-key", settings.ApiKey);
         using var _ = await httpClient.SendAsync(request, ct);
     }
@@ -216,7 +284,7 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "FAILED") throw new ServiceException("Only a failed video draft can be retried.", 409);
-        if (!File.Exists(storage.GetPath(draft.VideoUrl))) throw new ServiceException("The original video file is no longer available.", 409);
+        await storage.PrepareForProcessingAsync(draft.VideoUrl, ct);
         draft.Status = "PENDING"; draft.ErrorMessage = null; draft.UpdatedAt = VietnamTime.Now;
         await drafts.SaveChangesAsync(ct);
         return ToResponse(draft);
@@ -247,11 +315,13 @@ public sealed class VideoRecipeDraftService(
             draft.Status = "PROCESSING"; draft.UpdatedAt = VietnamTime.Now; await drafts.SaveChangesAsync(ct);
             try
             {
-                var generated = await analyzer.AnalyzeAsync(storage.GetPath(draft.VideoUrl), GetContentType(draft.VideoUrl), ct);
+                var videoPath = await storage.PrepareForProcessingAsync(draft.VideoUrl, ct);
+                var generated = await analyzer.AnalyzeAsync(videoPath, GetContentType(draft.VideoUrl), ct);
                 draft.GeminiFileName = generated.GeminiFileName; draft.Title = generated.Title; draft.Description = generated.Description; draft.Transcript = generated.Transcript; draft.EstimatedPrepMinutes = generated.EstimatedPrepMinutes; draft.Status = "READY"; draft.UpdatedAt = VietnamTime.Now;
                 foreach (var ingredient in generated.Ingredients) await ingredients.AddAsync(new VideoRecipeDraftIngredient { VideoRecipeDraftId = draft.VideoRecipeDraftId, IngredientName = ingredient.IngredientName, Amount = ingredient.Amount, DietaryGroup = ingredient.DietaryGroup, AllergenId = null }, ct);
                 foreach (var step in generated.Steps) await steps.AddAsync(new VideoRecipeDraftStep { VideoRecipeDraftId = draft.VideoRecipeDraftId, StepNumber = step.StepNumber, Instruction = step.Instruction }, ct);
                 await drafts.SaveChangesAsync(ct);
+                storage.Delete(draft.VideoUrl);
             }
             catch (Exception ex)
             {
@@ -316,6 +386,7 @@ public sealed class VideoRecipeDraftService(
         }
 
         await drafts.SaveChangesAsync(cancellationToken);
+        storage.Delete(draft.VideoUrl);
 
         return await GetAsync(draft.VideoRecipeDraftId, userId, "USER", cancellationToken);
     }

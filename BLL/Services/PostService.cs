@@ -19,7 +19,8 @@ public class PostService(
     public async Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default)
     {
         await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
-        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = request.VideoUrl?.Trim(), Status = "PUBLISHED" };
+        var videoUrl = request.VideoUrl?.Trim();
+        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PUBLISHED" };
         await posts.AddAsync(post, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
         await SetTagsAsync(post, request.TagIds, cancellationToken);
@@ -51,7 +52,8 @@ public class PostService(
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
-        post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.CategoryId = request.CategoryId; post.VideoUrl = request.VideoUrl?.Trim();
+        var videoUrl = request.VideoUrl?.Trim();
+        post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.CategoryId = request.CategoryId; post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl);
         if (!string.IsNullOrWhiteSpace(request.Status) && role == "ADMIN") post.Status = FixedValues.PostStatus(request.Status);
         await posts.SaveChangesAsync(cancellationToken); await SetTagsAsync(post, request.TagIds, cancellationToken);
     }
@@ -151,7 +153,7 @@ public class PostService(
         var ids = (tagIds ?? []).Distinct().ToHashSet();
         if (ids.Count > 0 && await tags.Query().CountAsync(x => ids.Contains(x.TagId), ct) != ids.Count) throw new ServiceException("One or more tags were not found.", 404);
     }
-    private static PostResponse ToResponse(Post x) => new(x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.CategoryId, x.Category?.Name, x.Title, x.Content, x.PostType, x.VideoUrl, x.Status, x.PostTags.Select(pt => pt.Tag.Name).ToList(), x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating));
+    private static PostResponse ToResponse(Post x) => new(x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.CategoryId, x.Category?.Name, x.Title, x.Content, x.PostType, x.VideoUrl, x.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl), x.Status, x.PostTags.Select(pt => pt.Tag.Name).ToList(), x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating));
     private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
     private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies);
     private static void EnsureOwner(int ownerId, int actorId, string role) { if (ownerId != actorId && role != "ADMIN") throw new ServiceException("You do not have permission to modify this content.", 403); }
