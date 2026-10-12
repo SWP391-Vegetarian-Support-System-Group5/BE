@@ -54,8 +54,9 @@ public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber, [Requir
 public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, int? CategoryId, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, [Range(1, 5000)] decimal? CaloriesPerServing, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, List<int>? TagIds);
 public record RecipeResponse(int PostId, string Title, string Content, string Status, decimal? Servings, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds);
 public record GenerateMealPlanRequest(DateTime? StartDate, string? AvailableIngredients);
-public record MealPlanMealResponse(int DayNumber, string MealType, int RecipeId, string RecipeTitle, decimal? PlannedCalories);
-public record MealPlanResponse(int MealPlanId, DateTime StartDate, decimal? BMI, decimal? BMR, decimal? TDEE, decimal? TargetCaloriesPerDay, string? HealthGoal, IReadOnlyCollection<MealPlanMealResponse> Meals);
+public record MealPlanMealResponse(int MealPlanMealId, int DayNumber, string MealType, int RecipeId, string RecipeTitle);
+public record MealPlanResponse(int MealPlanId, DateTime StartDate, decimal? BMI, string? BmiCategory, IReadOnlyCollection<MealPlanMealResponse> Meals);
+public record AiMealResponse(int Day, string MealType, int RecipeId);
 public record CreateChatSessionRequest();
 public record ChatMessageRequest([Required, MaxLength(1000)] string Content);
 public record ChatMessageResponse(int ChatMessageId, string Sender, string Content, DateTime CreatedAt);

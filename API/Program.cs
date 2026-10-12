@@ -1,16 +1,19 @@
-using System.Text;
 using API.Infrastructure;
 using API.Services;
+using BLL.Common;
 using BLL.Services;
 using DAL.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Text;
+using CloudinaryDotNet;
+
 
 var builder = WebApplication.CreateBuilder(args);
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
@@ -44,6 +47,10 @@ if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOp
 builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddMemoryCache();
+var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
+builder.Services.AddSingleton(cloudinarySettings);
+var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
+builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
