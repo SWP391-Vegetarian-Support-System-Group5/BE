@@ -14,6 +14,7 @@ public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email,
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
 public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, string? HealthGoal, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive);
+public record AdminUserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, string? HealthGoal, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive, bool IsEmailVerified, DateTime CreatedAt, DateTime UpdatedAt);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
     string? Sex,
@@ -45,6 +46,7 @@ public record RestaurantReviewRequest([Required, MaxLength(250)] string Title, [
 public record RestaurantReviewResponse(int PostId, int RestaurantId, int UserId, string Title, string Content, int Rating);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, int? CategoryId, string? VideoUrl, List<int>? TagIds);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, int? CategoryId, string? VideoUrl, string? Status, List<int>? TagIds);
+public record UpdatePostStatusRequest([Required] string Status);
 public record PostResponse(int PostId, int UserId, string AuthorName, int? CategoryId, string? CategoryName, string Title, string Content, string PostType, string? VideoUrl, string Status, IReadOnlyCollection<string> Tags, double AverageRating);
 public record CommentRequest([Required] string Content);
 public record CommentResponse(int CommentId, int PostId, int UserId, string AuthorName, int? ParentCommentId, string Content, string Status, IReadOnlyCollection<CommentResponse> Replies);

@@ -15,9 +15,16 @@ public class ModerationService(IRepository<ModerationFlag> flags, IRepository<Po
     public async Task ReviewAsync(int id, int adminId, bool removeContent, CancellationToken cancellationToken = default)
     {
         var flag = await flags.FindAsync(id) ?? throw new ServiceException("Moderation flag was not found.", 404);
+        if (flag.Status != "PENDING") throw new ServiceException("Moderation flag has already been reviewed.", 409);
         flag.ReviewedBy = adminId; flag.Status = removeContent ? "REMOVED" : "APPROVED";
         if (removeContent && flag.PostId.HasValue) { var post = await posts.FindAsync(flag.PostId.Value); if (post is not null) post.Status = "REMOVED"; }
         if (removeContent && flag.CommentId.HasValue) { var comment = await comments.FindAsync(flag.CommentId.Value); if (comment is not null) comment.Status = "REMOVED"; }
+        if (!removeContent && flag.PostId.HasValue)
+        {
+            var hasOtherPendingFlags = await flags.Query().AnyAsync(x => x.FlagId != id && x.PostId == flag.PostId && x.Status == "PENDING", cancellationToken);
+            var post = await posts.FindAsync(flag.PostId.Value);
+            if (!hasOtherPendingFlags && post?.Status == "PENDING_REVIEW") post.Status = "PUBLISHED";
+        }
         await flags.SaveChangesAsync(cancellationToken);
     }
     private async Task<ModerationFlagResponse> ReportAsync(int? postId, int? commentId, int userId, ReportRequest request, CancellationToken ct)

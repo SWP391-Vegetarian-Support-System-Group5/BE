@@ -46,6 +46,9 @@ builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddMemoryCache();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
+builder.Services.AddScoped<IModerationAiService>(provider => new GeminiModerationAiService(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"),
+    provider.GetRequiredService<GeminiChatbotSettings>()));
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
 builder.Services.AddSingleton(sendGridSettings);
 builder.Services.AddHttpClient("Gemini", client => client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/"));

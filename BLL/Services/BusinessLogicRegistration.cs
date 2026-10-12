@@ -23,7 +23,6 @@ public static class BusinessLogicRegistration
         services.AddScoped<ISeedService, SeedService>();
         services.AddScoped<IHealthService, HealthService>();
         services.AddSingleton<IIngredientRecognitionService, MockIngredientRecognitionService>();
-        services.AddSingleton<IModerationAiService, MockModerationAiService>();
         return services;
     }
 }

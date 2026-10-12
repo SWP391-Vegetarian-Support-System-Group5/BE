@@ -227,6 +227,77 @@ public class GeminiChatbotService(HttpClient httpClient, GeminiChatbotSettings s
     }
 }
 
+public sealed class GeminiModerationAiService(HttpClient httpClient, GeminiChatbotSettings settings) : IModerationAiService
+{
+    private static readonly string[] UnsafeTerms =
+    [
+        "hate", "violence", "scam", "spam", "kill yourself",
+        "thù ghét", "bạo lực", "lừa đảo", "tự tử", "giết người"
+    ];
+
+    public async Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default)
+    {
+        var localReason = UnsafeTerms.FirstOrDefault(term => content.Contains(term, StringComparison.OrdinalIgnoreCase));
+        if (localReason is not null) return $"Potentially unsafe content matched the moderation rule: {localReason}.";
+
+        // Fail closed so an unconfigured AI provider cannot silently publish an unchecked post.
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            return "AI moderation is not configured, so this post requires manual review before publication.";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"models/{settings.Model}:generateContent");
+            request.Headers.Add("x-goog-api-key", settings.ApiKey);
+            request.Content = JsonContent.Create(new
+            {
+                systemInstruction = new
+                {
+                    parts = new[]
+                    {
+                        new
+                        {
+                            text = "You moderate posts before publication in a Vietnamese vegetarian community. Flag hate or harassment, sexual content, graphic violence, promotion of self-harm, scams, spam, illegal activity, or dangerous medical misinformation. Do not flag ordinary disagreement or normal food discussion. Return JSON only: {\"flagged\":true|false,\"reason\":\"short reason\"}."
+                        }
+                    }
+                },
+                contents = new[]
+                {
+                    new { role = "user", parts = new[] { new { text = content.Length > 12000 ? content[..12000] : content } } }
+                },
+                generationConfig = new { responseMimeType = "application/json", temperature = 0 }
+            });
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return "AI moderation was unavailable, so this post requires manual review before publication.";
+
+            using var responseDocument = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var text = responseDocument.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+            if (string.IsNullOrWhiteSpace(text))
+                return "AI moderation returned no decision, so this post requires manual review before publication.";
+
+            var firstBrace = text.IndexOf('{');
+            var lastBrace = text.LastIndexOf('}');
+            if (firstBrace < 0 || lastBrace <= firstBrace)
+                return "AI moderation returned an invalid decision, so this post requires manual review before publication.";
+            using var decision = JsonDocument.Parse(text[firstBrace..(lastBrace + 1)]);
+            if (!decision.RootElement.TryGetProperty("flagged", out var flagged) || !flagged.GetBoolean()) return null;
+            return decision.RootElement.TryGetProperty("reason", out var reason) && !string.IsNullOrWhiteSpace(reason.GetString())
+                ? reason.GetString()
+                : "AI flagged this post for manual review.";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Fail closed: provider or parsing failures must never accidentally publish unchecked content.
+            return "AI moderation failed, so this post requires manual review before publication.";
+        }
+    }
+}
+
 public class LocalKnowledgeBaseService(string knowledgeBaseDirectory) : IKnowledgeBaseService
 {
     public KnowledgeBaseMatch FindRelevant(string question)
@@ -245,10 +316,4 @@ public class LocalKnowledgeBaseService(string knowledgeBaseDirectory) : IKnowled
 public class MockIngredientRecognitionService : IIngredientRecognitionService
 {
     public Task<IReadOnlyCollection<IngredientRecognitionResponse>> RecognizeAsync(Stream image, string? fileName, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<IngredientRecognitionResponse>>([new("Tomato", 0.92m, "Looks fresh", ["Tomato tofu stir-fry", "Vegetable salad"]), new("Tofu", 0.88m, "Looks fresh", ["Tofu vegetable bowl"]) ]);
-}
-
-public class MockModerationAiService : IModerationAiService
-{
-    private static readonly string[] FlaggedTerms = ["hate", "violence", "spam", "scam"];
-    public Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default) => Task.FromResult(FlaggedTerms.Any(term => content.Contains(term, StringComparison.OrdinalIgnoreCase)) ? "Mock AI flagged potentially unsafe content for admin review." : null);
 }

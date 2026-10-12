@@ -11,13 +11,14 @@ namespace API.Controllers;
 [Route("api/admin")]
 public class AdministrationController(IUserAdministrationService userAdministrationService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService) : ControllerBase
 {
-    [HttpGet("users")] public Task<IReadOnlyCollection<UserResponse>> GetUsers(CancellationToken ct) => userAdministrationService.GetUsersAsync(ct);
-    [HttpGet("users/{id:int}")] public Task<UserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
+    [HttpGet("users")] public Task<IReadOnlyCollection<AdminUserResponse>> GetUsers(CancellationToken ct) => userAdministrationService.GetUsersAsync(ct);
+    [HttpGet("users/{id:int}")] public Task<AdminUserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
     [HttpPut("users/{id:int}/status")] public async Task<IActionResult> UpdateUserStatus(int id, UpdateUserStatusRequest request, CancellationToken ct) { await userAdministrationService.UpdateStatusAsync(id, request.IsActive, ct); return NoContent(); }
     [HttpDelete("users/{id:int}")] public async Task<IActionResult> DeleteUser(int id, CancellationToken ct) { await userAdministrationService.DeleteAsync(id, ct); return NoContent(); }
 
     [HttpGet("posts")] public Task<IReadOnlyCollection<PostResponse>> GetPosts([FromQuery] string? keyword, [FromQuery] int? category, [FromQuery] string? postType, [FromQuery] int? tag, [FromQuery] string? status, CancellationToken ct) => postService.GetAsync(keyword, category, postType, tag, status, true, ct);
     [HttpDelete("posts/{id:int}")] public async Task<IActionResult> DeletePost(int id, CancellationToken ct) { await postService.DeleteAsync(id, User.GetRequiredUserId(), "ADMIN", ct); return NoContent(); }
+    [HttpPut("posts/{id:int}/status")] public async Task<IActionResult> UpdatePostStatus(int id, UpdatePostStatusRequest request, CancellationToken ct) { await postService.SetStatusAsync(id, request.Status, ct); return NoContent(); }
     [HttpGet("comments")] public Task<IReadOnlyCollection<CommentResponse>> GetComments(CancellationToken ct) => postService.GetAllCommentsAsync(ct);
     [HttpDelete("comments/{id:int}")] public async Task<IActionResult> DeleteComment(int id, CancellationToken ct) { await postService.DeleteCommentAsync(id, User.GetRequiredUserId(), "ADMIN", ct); return NoContent(); }
 

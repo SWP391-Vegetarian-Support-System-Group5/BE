@@ -28,8 +28,8 @@ public sealed class SendGridSettings
 
 public interface IUserAdministrationService
 {
-    Task<IReadOnlyCollection<UserResponse>> GetUsersAsync(CancellationToken cancellationToken = default);
-    Task<UserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
     Task UpdateStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 }
@@ -84,6 +84,7 @@ public interface IPostService
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
+    Task SetStatusAsync(int id, string status, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddCommentAsync(int postId, int userId, int? parentCommentId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddReplyAsync(int parentCommentId, int userId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default);

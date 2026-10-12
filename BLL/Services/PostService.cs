@@ -19,11 +19,15 @@ public class PostService(
     public async Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default)
     {
         await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
-        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = request.VideoUrl?.Trim(), Status = "PUBLISHED" };
+        var title = request.Title.Trim();
+        var content = request.Content.Trim();
+        // Moderation happens before visibility: flagged content is never briefly published.
+        var flagReason = await moderationAiService.FlagReasonAsync($"Title: {title}\nContent: {content}", cancellationToken);
+        var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = title, Content = content, PostType = FixedValues.PostType(request.PostType), VideoUrl = request.VideoUrl?.Trim(), Status = flagReason is null ? "PUBLISHED" : "PENDING_REVIEW" };
         await posts.AddAsync(post, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
         await SetTagsAsync(post, request.TagIds, cancellationToken);
-        await CreateAiPostFlagAsync(post.PostId, post.Content, cancellationToken);
+        if (flagReason is not null) await CreateAiPostFlagAsync(post.PostId, flagReason, cancellationToken);
         return await GetByIdAsync(post.PostId, userId, "USER", cancellationToken);
     }
 
@@ -50,16 +54,34 @@ public class PostService(
     {
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
+        var isAdmin = string.Equals(role, "ADMIN", StringComparison.OrdinalIgnoreCase);
+        if (!isAdmin && post.Status == "PENDING_REVIEW") throw new ServiceException("This post is awaiting moderation and cannot be edited.", 409);
         await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
-        post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.CategoryId = request.CategoryId; post.VideoUrl = request.VideoUrl?.Trim();
-        if (!string.IsNullOrWhiteSpace(request.Status) && role == "ADMIN") post.Status = FixedValues.PostStatus(request.Status);
+        var title = request.Title.Trim();
+        var content = request.Content.Trim();
+        string? flagReason = null;
+        if (!isAdmin && (!title.Equals(post.Title, StringComparison.Ordinal) || !content.Equals(post.Content, StringComparison.Ordinal)))
+        {
+            flagReason = await moderationAiService.FlagReasonAsync($"Title: {title}\nContent: {content}", cancellationToken);
+            post.Status = flagReason is null ? "PUBLISHED" : "PENDING_REVIEW";
+        }
+        post.Title = title; post.Content = content; post.PostType = FixedValues.PostType(request.PostType); post.CategoryId = request.CategoryId; post.VideoUrl = request.VideoUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(request.Status) && isAdmin) post.Status = FixedValues.PostStatus(request.Status);
         await posts.SaveChangesAsync(cancellationToken); await SetTagsAsync(post, request.TagIds, cancellationToken);
+        if (flagReason is not null) await CreateAiPostFlagAsync(post.PostId, flagReason, cancellationToken);
     }
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role); post.Status = "REMOVED"; await posts.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetStatusAsync(int id, string status, CancellationToken cancellationToken = default)
+    {
+        var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
+        post.Status = FixedValues.PostStatus(status);
+        await posts.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<CommentResponse> AddCommentAsync(int postId, int userId, int? parentCommentId, CommentRequest request, CancellationToken cancellationToken = default)
@@ -155,10 +177,8 @@ public class PostService(
     private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
     private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies);
     private static void EnsureOwner(int ownerId, int actorId, string role) { if (ownerId != actorId && role != "ADMIN") throw new ServiceException("You do not have permission to modify this content.", 403); }
-    private async Task CreateAiPostFlagAsync(int postId, string content, CancellationToken ct)
+    private async Task CreateAiPostFlagAsync(int postId, string reason, CancellationToken ct)
     {
-        var reason = await moderationAiService.FlagReasonAsync(content, ct);
-        if (reason is null) return;
         await moderationFlags.AddAsync(new ModerationFlag { PostId = postId, Source = "AI", Reason = reason, Status = "PENDING" }, ct);
         await moderationFlags.SaveChangesAsync(ct);
     }
