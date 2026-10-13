@@ -1,8 +1,15 @@
-using BLL.Common;
+﻿using BLL.Common;
 using BLL.DTOs;
 using DAL.Entities;
 using DAL.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace BLL.Services;
 
@@ -10,181 +17,311 @@ public class MealPlanService(
     IRepository<User> users,
     IRepository<Recipe> recipes,
     IRepository<MealPlan> mealPlans,
-    IRepository<MealPlanMeal> mealPlanMeals) : IMealPlanService
+    IRepository<MealPlanMeal> mealPlanMeals,
+    IRepository<RecipeIngredient> recipeIngredients,
+    IMemoryCache cache,
+    IConfiguration configuration) : IMealPlanService
 {
-    public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken cancellationToken = default)
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken ct = default)
     {
-        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) ?? throw new ServiceException("User was not found.", 404);
-        var nutritionTarget = CalculateNutritionTarget(user.Profile);
+        return await GeneratePlanCoreAsync(userId, request, isRegenerate: false, ct);
+    }
+    public async Task<MealPlanResponse> RegenerateAsync(int id, int userId, GenerateMealPlanRequest request, CancellationToken ct = default)
+    {
+        string cacheKey = $"MealPlan_Regen_{userId}_{DateTime.UtcNow.Date:yyyyMMdd}";
+        int regenCount = cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1);
+            return 0;
+        });
+
+        if (regenCount >= 3)
+            throw new ServiceException("You have reached the meal plan regeneration limit (3 times/day). Please try again tomorrow.", 429);
+
+        var oldPlan = await mealPlans.FindAsync(id);
+        if (oldPlan != null && oldPlan.UserId == userId)
+        {
+            var oldMeals = await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(ct);
+            foreach (var m in oldMeals) mealPlanMeals.Remove(m);
+            mealPlans.Remove(oldPlan);
+            await mealPlans.SaveChangesAsync(ct);
+        }
+
+        cache.Set(cacheKey, regenCount + 1, TimeSpan.FromDays(1));
+        return await GeneratePlanCoreAsync(userId, request, isRegenerate: true, ct);
+    }
+
+    private async Task<MealPlanResponse> GeneratePlanCoreAsync(int userId, GenerateMealPlanRequest request, bool isRegenerate, CancellationToken ct)
+    {
+        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new ServiceException("User not found.", 404);
+
+        var (bmi, bmiCategory) = CalculateDisplayBmi(user.Profile);
+
+        await ValidateIngredientsAsync(request.AvailableIngredients, ct);
+
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
         var dietTypeId = user.Profile?.DietTypeId;
-        var candidates = await recipes.Query()
+
+        var allValidCandidates = await recipes.Query()
             .Include(x => x.Post)
             .Include(x => x.Ingredients)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED")
-            .ToListAsync(cancellationToken);
-        candidates = candidates
-            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
-            .Where(x => x.CaloriesPerServing.HasValue)
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
+            .ToListAsync(ct);
+
+        var filteredCandidates = allValidCandidates
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
             .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
             .ToList();
-        if (candidates.Count == 0) throw new ServiceException("No recipe with calorie data matches the user's diet type and allergens.", 400);
 
-        var availableIngredients = ParseIngredients(request.AvailableIngredients);
+        if (filteredCandidates.Count < 21) throw new ServiceException("The system does not have enough recipes suitable for your diet/allergies to create a full 7-day plan.", 400);
+
+        var rnd = new Random();
+        var aiCandidates = filteredCandidates
+            .OrderBy(x => rnd.Next())
+            .Take(45)
+            .Select(x => new {
+                Id = x.PostId,
+                Title = x.Post.Title,
+                Ingredients = string.Join(", ", x.Ingredients.Select(i => i.IngredientName))
+            }).ToList();
+
+        var aiSelectedMeals = await CallGeminiForMealPlanAsync(aiCandidates, request.AvailableIngredients, bmi, ct);
+
         var plan = new MealPlan
         {
             UserId = userId,
             StartDate = (request.StartDate ?? DateTime.UtcNow.Date).Date,
             AvailableIngredients = request.AvailableIngredients?.Trim(),
-            BMI = nutritionTarget.Bmi,
-            BMR = nutritionTarget.Bmr,
-            TDEE = nutritionTarget.Tdee,
-            TargetCaloriesPerDay = nutritionTarget.TargetCalories,
-            HealthGoal = user.Profile?.HealthGoal
+            BMI = bmi
         };
-        await mealPlans.AddAsync(plan, cancellationToken); await mealPlans.SaveChangesAsync(cancellationToken);
+        await mealPlans.AddAsync(plan, ct); await mealPlans.SaveChangesAsync(ct);
 
-        var mealTypes = new[] { "BREAKFAST", "LUNCH", "DINNER" };
-        for (var day = 1; day <= 7; day++)
+        foreach (var meal in aiSelectedMeals)
         {
-            var selectedMeals = SelectDailyRecipes(candidates, availableIngredients, nutritionTarget, day);
-            for (var mealIndex = 0; mealIndex < selectedMeals.Count; mealIndex++)
+            await mealPlanMeals.AddAsync(new MealPlanMeal { MealPlanId = plan.MealPlanId, DayNumber = meal.Day, MealType = meal.MealType, RecipeId = meal.RecipeId }, ct);
+        }
+        await mealPlanMeals.SaveChangesAsync(ct);
+
+        return await GetByIdAsync(plan.MealPlanId, userId, "USER", ct);
+    }
+
+    public async Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct = default)
+    {
+        string cacheKey = $"MealPlan_Replace_{mealPlanId}";
+        int replaceCount = cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7);
+            return 0;
+        });
+
+        if (replaceCount >= 5)
+            throw new ServiceException("You have reached the meal replacement limit (5 times/week).", 429);
+
+        var plan = await mealPlans.Query().Include(x => x.Meals).SingleOrDefaultAsync(x => x.MealPlanId == mealPlanId && x.UserId == userId, ct) ?? throw new ServiceException("Meal plan not found.", 404);
+        var mealToReplace = plan.Meals.FirstOrDefault(x => x.MealPlanMealId == mealPlanMealId) ?? throw new ServiceException("Meal not found in plan.", 404);
+
+        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, ct);
+        var userAllergenIds = user!.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+
+        var currentRecipeIdsInPlan = plan.Meals.Select(x => x.RecipeId).ToHashSet();
+
+        var replacement = await recipes.Query()
+            .Include(x => x.Post)
+            .Include(x => x.Ingredients)
+            .Include(x => x.DietCompatibilities)
+            .Where(x => x.Post.Status == "PUBLISHED" && x.PostId != mealToReplace.RecipeId && !currentRecipeIdsInPlan.Contains(x.PostId))
+            .Where(x => !user.Profile!.DietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == user.Profile.DietTypeId.Value && d.IsCompatible))
+            .OrderBy(x => Guid.NewGuid())
+            .FirstOrDefaultAsync(ct);
+
+        if (replacement == null) throw new ServiceException("No suitable meal found for replacement.", 404);
+
+        mealToReplace.RecipeId = replacement.PostId;
+        await mealPlanMeals.SaveChangesAsync(ct);
+
+        cache.Set(cacheKey, replaceCount + 1, TimeSpan.FromDays(7));
+        return await GetByIdAsync(mealPlanId, userId, "USER", ct);
+    }
+    private (decimal? Bmi, string? Category) CalculateDisplayBmi(UserProfile? profile)
+    {
+        if (profile?.HeightCm == null || profile?.WeightKg == null) return (null, null);
+        var heightM = profile.HeightCm.Value / 100m;
+        var bmi = Math.Round(profile.WeightKg.Value / (heightM * heightM), 2);
+        string category = bmi switch
+        {
+            < 18.5m => "Underweight",
+            < 25m => "Normal",
+            _ => "Overweight"
+        };
+        return (bmi, category);
+    }
+
+    private async Task ValidateIngredientsAsync(string? availableIngredients, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(availableIngredients)) return;
+
+        var inputList = availableIngredients
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => x.ToLowerInvariant())
+            .ToList();
+
+        var dbIngredients = await recipeIngredients.Query()
+            .Select(x => x.IngredientName.ToLower())
+            .Distinct()
+            .ToListAsync(ct);
+
+        var invalidIngredients = new List<string>();
+
+        foreach (var input in inputList)
+        {
+            bool isExactMatch = dbIngredients.Contains(input);
+            bool isPartialMatch = dbIngredients.Any(dbIng =>
+                dbIng.Contains(input) || input.Contains(dbIng)
+            );
+
+            if (!isExactMatch && !isPartialMatch)
             {
-                var selected = selectedMeals[mealIndex];
-                await mealPlanMeals.AddAsync(new MealPlanMeal { MealPlanId = plan.MealPlanId, DayNumber = day, MealType = mealTypes[mealIndex], RecipeId = selected.PostId, PlannedCalories = selected.CaloriesPerServing }, cancellationToken);
+                invalidIngredients.Add(input);
             }
         }
-        await mealPlanMeals.SaveChangesAsync(cancellationToken);
-        return await GetByIdAsync(plan.MealPlanId, userId, "USER", cancellationToken);
+
+        if (invalidIngredients.Any())
+        {
+            throw new ServiceException($"Ingredients '{string.Join(", ", invalidIngredients)}' are invalid or not available in our data.", 400);
+        }
+    }
+
+    private async Task<List<AiMealResponse>> CallGeminiForMealPlanAsync(object candidates, string? availableIngredients, decimal? bmi, CancellationToken ct)
+    {
+        using var client = new HttpClient();
+        client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+
+        var apiKey = configuration["Gemini:ApiKey"] ?? configuration["Gemini__ApiKey"];
+
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            throw new ServiceException("Gemini API Key not found in the system.", 500);
+        }
+
+        string bmiText = bmi.HasValue ? bmi.Value.ToString("0.##") : "Undetermined";
+
+        // 1. Cải thiện Prompt: Không dùng [ID] để tránh AI tưởng nhầm là mảng
+        var prompt = $@"Bạn là một chuyên gia dinh dưỡng thuần chay. Nhiệm vụ của bạn là lập thực đơn 7 ngày (Sáng, Trưa, Tối) dựa TRÊN ĐÚNG danh sách các món ăn ứng viên được cung cấp dưới đây.
+
+            THÔNG TIN NGƯỜI DÙNG:
+        - Chỉ số BMI: {bmiText} (Hãy cân nhắc chọn món thanh đạm nếu thừa cân, và giàu dinh dưỡng nếu thiếu cân).
+        - Nguyên liệu ưu tiên có sẵn: {availableIngredients ?? "Không có"}.
+
+            DANH SÁCH MÓN ĂN ỨNG VIÊN (Định dạng JSON):
+        {JsonSerializer.Serialize(candidates)}
+
+            RÀNG BUỘC BẮT BUỘC (CRITICAL RULES):
+        1. TUYỆT ĐỐI CHỈ CHỌN các món ăn có trong ""DANH SÁCH MÓN ĂN ỨNG VIÊN"" ở trên. Không được tự tạo ra món mới.
+        2. Ưu tiên tối đa việc chọn các món có chứa ""Nguyên liệu ưu tiên có sẵn"".
+        3. Thực đơn phải đủ 7 ngày, mỗi ngày 3 bữa (BREAKFAST, LUNCH, DINNER). Không trùng lặp quá nhiều món trong một tuần.
+
+            ĐỊNH DẠNG ĐẦU RA BẮT BUỘC:
+        Trả về duy nhất một mảng JSON (không kèm văn bản giải thích), với cấu trúc chính xác như sau:
+        [
+            {{ ""Day"": 1, ""MealType"": ""BREAKFAST"", ""RecipeId"": 123 }},
+            {{ ""Day"": 1, ""MealType"": ""LUNCH"", ""RecipeId"": 456 }}
+        ]";
+
+        var requestBody = new { contents = new[] { new { parts = new[] { new { text = prompt } } } } };
+
+        var response = await client.PostAsJsonAsync($"models/gemini-3.5-flash:generateContent?key={apiKey}", requestBody, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(ct);
+            throw new ServiceException($"AI Studio connection error: {errorContent}", 500);
+        }
+
+        var jsonResult = await response.Content.ReadAsStringAsync(ct);
+        string cleanJson = string.Empty;
+
+        try
+        {
+            using var document = JsonDocument.Parse(jsonResult);
+            var textPart = document.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("text").GetString();
+
+            if (!string.IsNullOrEmpty(textPart))
+            {
+                cleanJson = textPart.Replace("```json", "").Replace("```", "").Trim();
+            }
+        }
+        catch
+        {
+            throw new ServiceException("Unable to read the response from AI Studio.", 500);
+        }
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            AllowTrailingCommas = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        };
+
+        return JsonSerializer.Deserialize<List<AiMealResponse>>(cleanJson, options)
+               ?? throw new ServiceException("The AI returned the wrong format.", 500);
     }
 
     public async Task<IReadOnlyCollection<MealPlanResponse>> GetAsync(int userId, CancellationToken cancellationToken = default)
     {
-        var plans = await BaseQuery().Where(x => x.UserId == userId).OrderByDescending(x => x.StartDate).ToListAsync(cancellationToken);
-        return plans.Select(ToResponse).ToList();
-    }
+        var plans = await mealPlans.Query()
+            .Include(x => x.Meals)
+            .ThenInclude(x => x.Recipe)
+            .ThenInclude(x => x.Post)
+            .Where(x => x.UserId == userId)
+            .OrderByDescending(x => x.StartDate)
+            .ToListAsync(cancellationToken);
 
-    public async Task<MealPlanResponse> GetByIdAsync(int id, int userId, string role, CancellationToken cancellationToken = default)
+        return plans.Select(plan =>
+        {
+            string? bmiCat = null;
+            if (plan.BMI.HasValue) bmiCat = plan.BMI.Value < 18.5m ? "Underweight" : plan.BMI.Value < 25m ? "Normal" : "Overweight";
+
+            return new MealPlanResponse(
+                plan.MealPlanId,
+                plan.StartDate,
+                plan.BMI,
+                bmiCat,
+                plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title)).ToList()
+            );
+        }).ToList();
+    }
+    public async Task<MealPlanResponse> GetByIdAsync(int id, int userId, string role, CancellationToken ct = default)
     {
-        var plan = await BaseQuery().SingleOrDefaultAsync(x => x.MealPlanId == id, cancellationToken) ?? throw new ServiceException("Meal plan was not found.", 404);
-        if (plan.UserId != userId && role != "ADMIN") throw new ServiceException("You do not have permission to view this meal plan.", 403);
-        return ToResponse(plan);
-    }
+        var plan = await mealPlans.Query().Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.Post).SingleOrDefaultAsync(x => x.MealPlanId == id, ct) ?? throw new ServiceException("Meal plan was not found.", 404);
+        if (plan.UserId != userId && role != "ADMIN") throw new ServiceException("Forbidden", 403);
 
+        string? bmiCat = null;
+        if (plan.BMI.HasValue) bmiCat = plan.BMI.Value < 18.5m ? "Underweight" : plan.BMI.Value < 25m ? "Normal" : "Overweight";
+
+        return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title)).ToList());
+    }
     public async Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default)
     {
         var plan = await mealPlans.FindAsync(id) ?? throw new ServiceException("Meal plan was not found.", 404);
-        if (plan.UserId != userId && role != "ADMIN") throw new ServiceException("You do not have permission to delete this meal plan.", 403);
-        foreach (var meal in await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(cancellationToken)) mealPlanMeals.Remove(meal);
-        await mealPlanMeals.SaveChangesAsync(cancellationToken); mealPlans.Remove(plan); await mealPlans.SaveChangesAsync(cancellationToken);
-    }
 
-    private IQueryable<MealPlan> BaseQuery() => mealPlans.Query().Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.Post);
-    private static MealPlanResponse ToResponse(MealPlan x) => new(x.MealPlanId, x.StartDate, x.BMI, x.BMR, x.TDEE, x.TargetCaloriesPerDay, x.HealthGoal, x.Meals.OrderBy(m => m.DayNumber).ThenBy(MealTypeOrder).Select(m => new MealPlanMealResponse(m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title, m.PlannedCalories)).ToList());
-    private static HashSet<string> ParseIngredients(string? value) => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => x.ToLowerInvariant()).ToHashSet();
+        if (plan.UserId != userId && role != "ADMIN")
+            throw new ServiceException("You do not have permission to delete this meal plan.", 403);
 
-    private static IReadOnlyList<Recipe> SelectDailyRecipes(IReadOnlyCollection<Recipe> candidates, IReadOnlySet<string> availableIngredients, NutritionTarget nutritionTarget, int day)
-    {
-        var pool = candidates
-            .OrderByDescending(x => x.Ingredients.Count(i => availableIngredients.Contains(i.IngredientName.ToLowerInvariant())))
-            .ThenBy(x => (x.PostId + day) % candidates.Count)
-            .Take(30)
-            .ToList();
-
-        if (pool.Count < 3)
-            throw new ServiceException("At least three recipes with calorie data are required to generate a daily meal plan.", 400);
-
-        List<Recipe>? best = null;
-        var bestScore = decimal.MaxValue;
-        for (var first = 0; first < pool.Count - 2; first++)
-        for (var second = first + 1; second < pool.Count - 1; second++)
-        for (var third = second + 1; third < pool.Count; third++)
+        var meals = await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(cancellationToken);
+        foreach (var meal in meals)
         {
-            var selected = new[] { pool[first], pool[second], pool[third] };
-            var totalCalories = selected.Sum(x => x.CaloriesPerServing ?? 0);
-            var ingredientMatches = selected.Sum(x => x.Ingredients.Count(i => availableIngredients.Contains(i.IngredientName.ToLowerInvariant())));
-            var score = ScoreDailySelection(totalCalories, ingredientMatches, nutritionTarget);
-            if (score >= bestScore) continue;
-
-            bestScore = score;
-            best = selected.ToList();
+            mealPlanMeals.Remove(meal);
         }
 
-        return best!
-            .OrderBy(x => (x.PostId + day) % 3)
-            .ToList();
+        await mealPlanMeals.SaveChangesAsync(cancellationToken);
+        mealPlans.Remove(plan);
+        await mealPlans.SaveChangesAsync(cancellationToken);
     }
-
-    private static NutritionTarget CalculateNutritionTarget(UserProfile? profile)
-    {
-        if (profile is null)
-            throw new ServiceException("Please complete your profile before generating a meal plan.", 400);
-        if (!profile.HeightCm.HasValue || !profile.WeightKg.HasValue)
-            throw new ServiceException("Please provide height and weight before generating a meal plan.", 400);
-
-        var heightM = profile.HeightCm.Value / 100m;
-        var bmi = Math.Round(profile.WeightKg.Value / (heightM * heightM), 2);
-        if (string.IsNullOrWhiteSpace(profile.Sex) || !profile.BirthDate.HasValue || string.IsNullOrWhiteSpace(profile.ActivityLevel) || string.IsNullOrWhiteSpace(profile.HealthGoal))
-            return new(bmi, null, null, null);
-
-        var age = CalculateAge(profile.BirthDate.Value, DateTime.UtcNow.Date);
-        if (age is < 13 or > 120)
-            return new(bmi, null, null, null);
-
-        var bmr = profile.Sex == "MALE"
-            ? 10m * profile.WeightKg.Value + 6.25m * profile.HeightCm.Value - 5m * age + 5m
-            : 10m * profile.WeightKg.Value + 6.25m * profile.HeightCm.Value - 5m * age - 161m;
-        var tdee = bmr * ActivityFactor(profile.ActivityLevel);
-        var targetCalories = profile.HealthGoal switch
-        {
-            "WEIGHT_LOSS" => tdee - 500m,
-            "MUSCLE_GAIN" => tdee + 300m,
-            _ => tdee
-        };
-
-        return new(Math.Round(bmi, 2), Math.Round(bmr, 2), Math.Round(tdee, 2), Math.Round(Math.Max(targetCalories, 1200m), 2));
-    }
-
-    private static decimal ScoreDailySelection(decimal totalCalories, int ingredientMatches, NutritionTarget nutritionTarget)
-    {
-        const decimal ingredientBonus = 100m;
-        if (nutritionTarget.TargetCalories.HasValue)
-            return Math.Abs(totalCalories - nutritionTarget.TargetCalories.Value) - ingredientMatches * ingredientBonus;
-
-        return nutritionTarget.Bmi switch
-        {
-            < 18.5m => -totalCalories - ingredientMatches * ingredientBonus,
-            >= 25m => totalCalories - ingredientMatches * ingredientBonus,
-            _ => -ingredientMatches * ingredientBonus
-        };
-    }
-
-    private static int CalculateAge(DateTime birthDate, DateTime today)
-    {
-        var age = today.Year - birthDate.Year;
-        if (birthDate.Date > today.AddYears(-age)) age--;
-        return age;
-    }
-
-    private static decimal ActivityFactor(string activityLevel) => activityLevel switch
-    {
-        "SEDENTARY" => 1.2m,
-        "LIGHT" => 1.375m,
-        "MODERATE" => 1.55m,
-        "ACTIVE" => 1.725m,
-        "VERY_ACTIVE" => 1.9m,
-        _ => throw new ServiceException("Activity level is invalid.", 400)
-    };
-
-    private static int MealTypeOrder(MealPlanMeal meal) => meal.MealType switch
-    {
-        "BREAKFAST" => 0,
-        "LUNCH" => 1,
-        "DINNER" => 2,
-        _ => 4
-    };
-
-    private sealed record NutritionTarget(decimal Bmi, decimal? Bmr, decimal? Tdee, decimal? TargetCalories);
 }
