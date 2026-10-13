@@ -13,15 +13,19 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
             logger.LogWarning(exception, "Request failed with a business validation error.");
             await WriteAsync(context, exception.StatusCode, exception.Message, exception.Errors);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !context.RequestAborted.IsCancellationRequested)
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogDebug("The client cancelled the request.");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException && !context.RequestAborted.IsCancellationRequested)
         {
             logger.LogWarning(exception, "An external service is temporarily unavailable.");
             await WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
-                "The map data provider is temporarily unavailable. Please try again.", []);
+                "An external service is temporarily unavailable. Please try again.", []);
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Unhandled API error.");
+            logger.LogError(exception, "Unhandled API error for {Method} {Path}.", context.Request.Method, context.Request.Path);
             var errors = environment.IsDevelopment() ? [exception.GetBaseException().Message] : Array.Empty<string>();
             await WriteAsync(context, StatusCodes.Status500InternalServerError, "An unexpected server error occurred.", errors);
         }

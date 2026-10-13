@@ -10,8 +10,10 @@ namespace API.Controllers;
 [Route("api")]
 public class ReferenceDataController(IReferenceDataAndRestaurantService referenceDataService) : ControllerBase
 {
+    [Authorize]
     [HttpGet("diet-types")] public Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypes(CancellationToken ct) => referenceDataService.GetDietTypesAsync(ct);
     [HttpGet("categories")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetCategories(CancellationToken ct) => referenceDataService.GetCategoriesAsync(ct);
+    [Authorize]
     [HttpGet("allergens")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergens(CancellationToken ct) => referenceDataService.GetAllergensAsync(ct);
     [HttpGet("tags")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetTags(CancellationToken ct) => referenceDataService.GetTagsAsync(ct);
     [Authorize(Roles = "ADMIN")]
@@ -21,10 +23,14 @@ public class ReferenceDataController(IReferenceDataAndRestaurantService referenc
     [Authorize(Roles = "ADMIN")]
     [HttpDelete("tags/{id:int}")] public async Task<IActionResult> DeleteTag(int id, CancellationToken ct) { await referenceDataService.DeleteTagAsync(id, ct); return NoContent(); }
 
+    [Authorize]
     [HttpGet("restaurants")] public Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurants([FromQuery] string? food, CancellationToken ct) => referenceDataService.GetRestaurantsAsync(food, ct);
+    [Authorize]
     [HttpGet("restaurants/nearby")] public Task<IReadOnlyCollection<RestaurantResponse>> Nearby([FromQuery] decimal latitude, [FromQuery] decimal longitude, [FromQuery] decimal radius, CancellationToken ct) => referenceDataService.GetNearbyRestaurantsAsync(latitude, longitude, radius, ct);
+    [Authorize]
     [HttpGet("restaurants/{id:int}")] public async Task<ActionResult<RestaurantResponse>> GetRestaurant(int id, CancellationToken ct) => (await referenceDataService.GetRestaurantAsync(id, ct)) is { } restaurant ? Ok(restaurant) : NotFound();
     [Authorize]
     [HttpPost("restaurants/{restaurantId:int}/reviews")] public async Task<ActionResult<RestaurantReviewResponse>> CreateReview(int restaurantId, RestaurantReviewRequest request, CancellationToken ct) => Created($"/api/restaurants/{restaurantId}/reviews", await referenceDataService.CreateRestaurantReviewAsync(restaurantId, User.GetRequiredUserId(), request, ct));
+    [Authorize]
     [HttpGet("restaurants/{restaurantId:int}/reviews")] public Task<IReadOnlyCollection<RestaurantReviewResponse>> GetReviews(int restaurantId, CancellationToken ct) => referenceDataService.GetRestaurantReviewsAsync(restaurantId, ct);
 }

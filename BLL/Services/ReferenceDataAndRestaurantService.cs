@@ -133,7 +133,8 @@ public class ReferenceDataAndRestaurantService(
     public async Task<RestaurantReviewResponse> CreateRestaurantReviewAsync(int restaurantId, int userId, RestaurantReviewRequest request, CancellationToken cancellationToken = default)
     {
         if (!await restaurants.Query().AnyAsync(x => x.RestaurantId == restaurantId, cancellationToken)) throw new ServiceException("Restaurant was not found.", 404);
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "BLOG", Status = "PUBLISHED" };
+        var now = VietnamTime.Now;
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "BLOG", Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         await restaurantReviews.AddAsync(new RestaurantReview { PostId = post.PostId, RestaurantId = restaurantId, Rating = request.Rating }, cancellationToken); await restaurantReviews.SaveChangesAsync(cancellationToken);
         return new(post.PostId, restaurantId, userId, post.Title, post.Content, request.Rating);

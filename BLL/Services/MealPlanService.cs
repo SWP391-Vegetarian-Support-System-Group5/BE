@@ -1,6 +1,7 @@
 ﻿using BLL.Common;
 using BLL.DTOs;
 using DAL.Entities;
+using DAL.Data;
 using DAL.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -18,11 +19,12 @@ public class MealPlanService(
     IRepository<Recipe> recipes,
     IRepository<MealPlan> mealPlans,
     IRepository<MealPlanMeal> mealPlanMeals,
-    IRepository<RecipeIngredient> recipeIngredients,
     IMemoryCache cache,
-    IConfiguration configuration) : IMealPlanService
+    IConfiguration configuration,
+    VegetarianDbContext dbContext) : IMealPlanService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private sealed record MealCandidate(int Id, string Title, string Ingredients);
     public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken ct = default)
     {
         return await GeneratePlanCoreAsync(userId, request, isRegenerate: false, ct);
@@ -39,17 +41,20 @@ public class MealPlanService(
         if (regenCount >= 3)
             throw new ServiceException("You have reached the meal plan regeneration limit (3 times/day). Please try again tomorrow.", 429);
 
-        var oldPlan = await mealPlans.FindAsync(id);
-        if (oldPlan != null && oldPlan.UserId == userId)
-        {
-            var oldMeals = await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(ct);
-            foreach (var m in oldMeals) mealPlanMeals.Remove(m);
-            mealPlans.Remove(oldPlan);
-            await mealPlans.SaveChangesAsync(ct);
-        }
+        var oldPlan = await mealPlans.FindAsync(id) ?? throw new ServiceException("Meal plan not found.", 404);
+        if (oldPlan.UserId != userId) throw new ServiceException("Forbidden", 403);
 
+        // Keep the previous plan until its complete replacement has been saved.
+        await using var transaction = dbContext.Database.CurrentTransaction is null
+            ? await dbContext.Database.BeginTransactionAsync(ct) : null;
+        var replacement = await GeneratePlanCoreAsync(userId, request, isRegenerate: true, ct);
+        var oldMeals = await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(ct);
+        foreach (var meal in oldMeals) mealPlanMeals.Remove(meal);
+        mealPlans.Remove(oldPlan);
+        await mealPlans.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         cache.Set(cacheKey, regenCount + 1, TimeSpan.FromDays(1));
-        return await GeneratePlanCoreAsync(userId, request, isRegenerate: true, ct);
+        return replacement;
     }
 
     private async Task<MealPlanResponse> GeneratePlanCoreAsync(int userId, GenerateMealPlanRequest request, bool isRegenerate, CancellationToken ct)
@@ -58,7 +63,6 @@ public class MealPlanService(
 
         var (bmi, bmiCategory) = CalculateDisplayBmi(user.Profile);
 
-        await ValidateIngredientsAsync(request.AvailableIngredients, ct);
 
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
         var dietTypeId = user.Profile?.DietTypeId;
@@ -76,19 +80,24 @@ public class MealPlanService(
             .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
             .ToList();
 
-        if (filteredCandidates.Count < 21) throw new ServiceException("The system does not have enough recipes suitable for your diet/allergies to create a full 7-day plan.", 400);
+        if (filteredCandidates.Count == 0) throw new ServiceException("The system does not have any recipes suitable for your diet/allergies.", 400);
 
+        var preferences = IngredientPreferences.Parse(request.AvailableIngredients);
         var rnd = new Random();
         var aiCandidates = filteredCandidates
-            .OrderBy(x => rnd.Next())
+            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.IngredientName), preferences) })
+            .OrderByDescending(item => item.Matches)
+            .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
+            .ThenBy(_ => rnd.Next())
             .Take(45)
-            .Select(x => new {
-                Id = x.PostId,
-                Title = x.Post.Title,
-                Ingredients = string.Join(", ", x.Ingredients.Select(i => i.IngredientName))
-            }).ToList();
+            .Select(item => new MealCandidate(
+                item.Recipe.PostId,
+                item.Recipe.RecipeName,
+                string.Join(", ", item.Recipe.Ingredients.Select(i => i.IngredientName))))
+            .ToList();
+        if (aiCandidates.Count == 0) throw new ServiceException("No recipes are suitable for your diet/allergies.", 400);
 
-        var aiSelectedMeals = await CallGeminiForMealPlanAsync(aiCandidates, request.AvailableIngredients, bmi, ct);
+        var aiSelectedMeals = await TryBuildMealPlanAsync(aiCandidates, request.AvailableIngredients, bmi, ct);
 
         var plan = new MealPlan
         {
@@ -97,15 +106,78 @@ public class MealPlanService(
             AvailableIngredients = request.AvailableIngredients?.Trim(),
             BMI = bmi
         };
-        await mealPlans.AddAsync(plan, ct); await mealPlans.SaveChangesAsync(ct);
-
         foreach (var meal in aiSelectedMeals)
         {
-            await mealPlanMeals.AddAsync(new MealPlanMeal { MealPlanId = plan.MealPlanId, DayNumber = meal.Day, MealType = meal.MealType, RecipeId = meal.RecipeId }, ct);
+            plan.Meals.Add(new MealPlanMeal { DayNumber = meal.Day, MealType = meal.MealType, RecipeId = meal.RecipeId });
         }
-        await mealPlanMeals.SaveChangesAsync(ct);
+        await mealPlans.AddAsync(plan, ct);
+        await mealPlans.SaveChangesAsync(ct);
 
         return await GetByIdAsync(plan.MealPlanId, userId, "USER", ct);
+    }
+
+    private async Task<List<AiMealResponse>> TryBuildMealPlanAsync(List<MealCandidate> candidates, string? availableIngredients, decimal? bmi, CancellationToken ct)
+    {
+        try
+        {
+            var aiMeals = await CallGeminiForMealPlanAsync(candidates, availableIngredients, bmi, ct);
+            var validIds = CandidateIds(candidates);
+            var normalized = NormalizeMealPlan(aiMeals, validIds);
+            if (normalized.Count == 21) return normalized;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // Local fallback keeps meal planning usable when Gemini is unavailable or returns a short/invalid plan.
+        }
+
+        return BuildLocalMealPlan(candidates);
+    }
+
+    private static HashSet<int> CandidateIds(IEnumerable<MealCandidate> candidates) => candidates.Select(x => x.Id).ToHashSet();
+
+    private static List<AiMealResponse> NormalizeMealPlan(IEnumerable<AiMealResponse> meals, HashSet<int> validIds)
+    {
+        var result = new List<AiMealResponse>();
+        var usedSlots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var meal in meals)
+        {
+            if (!validIds.Contains(meal.RecipeId)) continue;
+            if (meal.Day is < 1 or > 7) continue;
+            var mealType = NormalizeMealType(meal.MealType);
+            var slot = $"{meal.Day}:{mealType}";
+            if (!usedSlots.Add(slot)) continue;
+            result.Add(new AiMealResponse(meal.Day, mealType, meal.RecipeId));
+        }
+        return result;
+    }
+
+    private static List<AiMealResponse> BuildLocalMealPlan(IReadOnlyList<MealCandidate> candidates)
+    {
+        if (candidates.Count == 0) throw new ServiceException("The system does not have any suitable recipes to create a meal plan.", 400);
+        var result = new List<AiMealResponse>(21);
+        var mealTypes = new[] { "BREAKFAST", "LUNCH", "DINNER" };
+        var index = 0;
+        for (var day = 1; day <= 7; day++)
+        {
+            foreach (var mealType in mealTypes)
+            {
+                result.Add(new AiMealResponse(day, mealType, candidates[index % candidates.Count].Id));
+                index++;
+            }
+        }
+        return result;
+    }
+
+    private static string NormalizeMealType(string? mealType)
+    {
+        var value = (mealType ?? string.Empty).Trim().ToUpperInvariant();
+        return value switch
+        {
+            "BREAKFAST" or "MORNING" or "SANG" or "SÁNG" => "BREAKFAST",
+            "LUNCH" or "MIDDAY" or "TRUA" or "TRƯA" => "LUNCH",
+            "DINNER" or "EVENING" or "TOI" or "TỐI" => "DINNER",
+            _ => "LUNCH"
+        };
     }
 
     public async Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct = default)
@@ -123,19 +195,30 @@ public class MealPlanService(
         var plan = await mealPlans.Query().Include(x => x.Meals).SingleOrDefaultAsync(x => x.MealPlanId == mealPlanId && x.UserId == userId, ct) ?? throw new ServiceException("Meal plan not found.", 404);
         var mealToReplace = plan.Meals.FirstOrDefault(x => x.MealPlanMealId == mealPlanMealId) ?? throw new ServiceException("Meal not found in plan.", 404);
 
-        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, ct);
-        var userAllergenIds = user!.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+        var user = await users.Query().Include(x => x.Profile).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new ServiceException("User not found.", 404);
+        var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+        var dietTypeId = user.Profile?.DietTypeId;
+        var preferences = IngredientPreferences.Parse(plan.AvailableIngredients);
 
         var currentRecipeIdsInPlan = plan.Meals.Select(x => x.RecipeId).ToHashSet();
 
-        var replacement = await recipes.Query()
+        var replacementCandidates = await recipes.Query()
             .Include(x => x.Post)
             .Include(x => x.Ingredients)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED" && x.PostId != mealToReplace.RecipeId && !currentRecipeIdsInPlan.Contains(x.PostId))
-            .Where(x => !user.Profile!.DietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == user.Profile.DietTypeId.Value && d.IsCompatible))
-            .OrderBy(x => Guid.NewGuid())
-            .FirstOrDefaultAsync(ct);
+            .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
+            .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
+            .ToListAsync(ct);
+        var random = new Random();
+        var replacement = replacementCandidates
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
+            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.IngredientName), preferences) })
+            .OrderByDescending(item => item.Matches)
+            .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
+            .ThenBy(_ => random.Next())
+            .Select(item => item.Recipe)
+            .FirstOrDefault();
 
         if (replacement == null) throw new ServiceException("No suitable meal found for replacement.", 404);
 
@@ -159,44 +242,9 @@ public class MealPlanService(
         return (bmi, category);
     }
 
-    private async Task ValidateIngredientsAsync(string? availableIngredients, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(availableIngredients)) return;
-
-        var inputList = availableIngredients
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(x => x.ToLowerInvariant())
-            .ToList();
-
-        var dbIngredients = await recipeIngredients.Query()
-            .Select(x => x.IngredientName.ToLower())
-            .Distinct()
-            .ToListAsync(ct);
-
-        var invalidIngredients = new List<string>();
-
-        foreach (var input in inputList)
-        {
-            bool isExactMatch = dbIngredients.Contains(input);
-            bool isPartialMatch = dbIngredients.Any(dbIng =>
-                dbIng.Contains(input) || input.Contains(dbIng)
-            );
-
-            if (!isExactMatch && !isPartialMatch)
-            {
-                invalidIngredients.Add(input);
-            }
-        }
-
-        if (invalidIngredients.Any())
-        {
-            throw new ServiceException($"Ingredients '{string.Join(", ", invalidIngredients)}' are invalid or not available in our data.", 400);
-        }
-    }
-
     private async Task<List<AiMealResponse>> CallGeminiForMealPlanAsync(object candidates, string? availableIngredients, decimal? bmi, CancellationToken ct)
     {
-        using var client = new HttpClient();
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
 
         var apiKey = configuration["Gemini:ApiKey"] ?? configuration["Gemini__ApiKey"];
@@ -232,7 +280,8 @@ public class MealPlanService(
 
         var requestBody = new { contents = new[] { new { parts = new[] { new { text = prompt } } } } };
 
-        var response = await client.PostAsJsonAsync($"models/gemini-3.5-flash:generateContent?key={apiKey}", requestBody, ct);
+        var model = configuration["Gemini:Model"] ?? "gemini-3.5-flash";
+        var response = await client.PostAsJsonAsync($"models/{model}:generateContent?key={apiKey}", requestBody, ct);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -293,7 +342,7 @@ public class MealPlanService(
                 plan.StartDate,
                 plan.BMI,
                 bmiCat,
-                plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title)).ToList()
+                plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName)).ToList()
             );
         }).ToList();
     }
@@ -305,7 +354,7 @@ public class MealPlanService(
         string? bmiCat = null;
         if (plan.BMI.HasValue) bmiCat = plan.BMI.Value < 18.5m ? "Underweight" : plan.BMI.Value < 25m ? "Normal" : "Overweight";
 
-        return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.Post.Title)).ToList());
+        return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName)).ToList());
     }
     public async Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default)
     {

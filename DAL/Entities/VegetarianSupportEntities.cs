@@ -73,6 +73,8 @@ public class Post
     public string? VideoUrl { get; set; }
     public string? ThumbnailUrl { get; set; }
     public string Status { get; set; } = "DRAFT";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
     public User User { get; set; } = null!;
     public Category? Category { get; set; }
     public Recipe? Recipe { get; set; }
@@ -91,6 +93,8 @@ public class Comment
     public int? ParentCommentId { get; set; }
     public string Content { get; set; } = null!;
     public string Status { get; set; } = "PUBLISHED";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
     public Post Post { get; set; } = null!;
     public User User { get; set; } = null!;
     public Comment? ParentComment { get; set; }
@@ -117,6 +121,7 @@ public class Bookmark
 public class Recipe
 {
     public int PostId { get; set; }
+    public string RecipeName { get; set; } = null!;
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
@@ -258,6 +263,7 @@ public class VideoRecipeDraft
     public string? GeminiFileName { get; set; }
     public string Status { get; set; } = "PROCESSING";
     public string? Title { get; set; }
+    public string? RecipeName { get; set; }
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }

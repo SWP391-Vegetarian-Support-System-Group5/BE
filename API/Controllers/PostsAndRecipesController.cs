@@ -12,7 +12,7 @@ public class PostsController(IPostService postService) : ControllerBase
 {
     [Authorize]
     [HttpPost] public async Task<ActionResult<PostResponse>> Create(CreatePostRequest request, CancellationToken ct) { var post = await postService.CreateAsync(User.GetRequiredUserId(), request, ct); return Created($"/api/posts/{post.PostId}", post); }
-    [HttpGet] public Task<IReadOnlyCollection<PostResponse>> Get([FromQuery] string? keyword, [FromQuery] int? category, [FromQuery] string? postType, [FromQuery] int? tag, [FromQuery] string? status, CancellationToken ct) => postService.GetAsync(keyword, category, postType, tag, status, User.IsInRole("ADMIN"), ct);
+    [HttpGet] public Task<IReadOnlyCollection<PostResponse>> Get([FromQuery] string? keyword, [FromQuery] int? category, [FromQuery] string? postType, [FromQuery] int? tag, [FromQuery] string? status, [FromQuery] int? limit, CancellationToken ct) => postService.GetAsync(keyword, category, postType, tag, status, User.IsInRole("ADMIN"), User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, limit, ct);
     [HttpGet("{id:int}")] public Task<PostResponse> GetById(int id, CancellationToken ct) => postService.GetByIdAsync(id, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null, ct);
     [Authorize]
     [HttpPut("{id:int}")] public async Task<IActionResult> Update(int id, UpdatePostRequest request, CancellationToken ct) { await postService.UpdateAsync(id, User.GetRequiredUserId(), User.GetRoleName(), request, ct); return NoContent(); }
