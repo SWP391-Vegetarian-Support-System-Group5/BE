@@ -56,7 +56,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Role).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.CreatedAt).IsRequired();
             entity.Property(x => x.UpdatedAt).IsRequired();
-            entity.Property(x => x.IsEmailVerified).IsRequired().HasDefaultValue(true);
+            entity.Property(x => x.IsEmailVerified).IsRequired();
             entity.HasOne(x => x.Profile).WithOne(x => x.User).HasForeignKey<UserProfile>(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -131,7 +131,10 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Content).IsRequired();
             entity.Property(x => x.PostType).HasMaxLength(30).IsUnicode(false).IsRequired();
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
+            entity.Property(x => x.ThumbnailUrl).HasMaxLength(1000).IsUnicode(false);
             entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
+            entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.User).WithMany(x => x.Posts).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Category).WithMany(x => x.Posts).HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -142,6 +145,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.CommentId);
             entity.Property(x => x.Content).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
+            entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.Post).WithMany(x => x.Comments).HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.User).WithMany(x => x.Comments).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.ParentComment).WithMany(x => x.Replies).HasForeignKey(x => x.ParentCommentId).OnDelete(DeleteBehavior.NoAction);
@@ -187,6 +192,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         {
             entity.ToTable("Recipes");
             entity.HasKey(x => x.PostId);
+            entity.Property(x => x.RecipeName).HasMaxLength(250).IsRequired();
             entity.Property(x => x.Servings).HasPrecision(5, 2);
             entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
@@ -286,7 +292,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.ToTable("ChatSessions");
             entity.HasKey(x => x.ChatSessionId);
             entity.Property(x => x.GuestAccessTokenHash).HasMaxLength(64).IsUnicode(false);
-            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
         });
 
@@ -296,12 +302,13 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.ChatMessageId);
             entity.Property(x => x.Sender).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.Content).IsRequired();
-            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.ChatSession).WithMany(x => x.Messages).HasForeignKey(x => x.ChatSessionId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<VideoRecipeDraft>(entity =>
         {
+            entity.Property(x => x.RecipeName).HasMaxLength(250);
             entity.ToTable("VideoRecipeDrafts");
             entity.HasKey(x => x.VideoRecipeDraftId);
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false).IsRequired();
@@ -311,8 +318,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Servings).HasPrecision(5, 2);
             entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
             entity.Property(x => x.ErrorMessage).HasMaxLength(1000);
-            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
-            entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("DATEADD(HOUR, 7, SYSUTCDATETIME())");
+            entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
+            entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);
         });
@@ -340,7 +347,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         {
             entity.ToTable("ModerationFlags", table => table.HasCheckConstraint(
                 "CK_ModerationFlags_OneTarget",
-                "([PostId] IS NULL AND [CommentId] IS NOT NULL) OR ([PostId] IS NOT NULL AND [CommentId] IS NULL)"));
+                "(PostId IS NULL AND CommentId IS NOT NULL) OR (PostId IS NOT NULL AND CommentId IS NULL)"));
             entity.HasKey(x => x.FlagId);
             entity.Property(x => x.Source).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(500);

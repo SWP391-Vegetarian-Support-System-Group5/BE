@@ -26,7 +26,9 @@ public record UpdateUserProfileRequest(
     [Range(-90, 90)] decimal? Latitude,
     [Range(-180, 180)] decimal? Longitude);
 public record UpdateUserLocationRequest(
+    [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-90, 90)] decimal Latitude,
+    [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-180, 180)] decimal Longitude);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
@@ -45,17 +47,18 @@ public record RestaurantReviewRequest([Required, MaxLength(250)] string Title, [
 public record RestaurantReviewResponse(int PostId, int RestaurantId, int UserId, string Title, string Content, int Rating);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, int? CategoryId, string? VideoUrl, List<int>? TagIds);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, int? CategoryId, string? VideoUrl, string? Status, List<int>? TagIds);
-public record PostResponse(int PostId, int UserId, string AuthorName, int? CategoryId, string? CategoryName, string Title, string Content, string PostType, string? VideoUrl, string Status, IReadOnlyCollection<string> Tags, double AverageRating);
+public record PostResponse(int PostId, int UserId, string AuthorName, int? CategoryId, string? CategoryName, string Title, string Content, string PostType, string? VideoUrl, string? ThumbnailUrl, string Status, IReadOnlyCollection<string> Tags, double AverageRating, int RatingCount, int CommentCount, int? CurrentUserRating, DateTime CreatedAt, DateTime UpdatedAt);
 public record CommentRequest([Required] string Content);
-public record CommentResponse(int CommentId, int PostId, int UserId, string AuthorName, int? ParentCommentId, string Content, string Status, IReadOnlyCollection<CommentResponse> Replies);
+public record CommentResponse(int CommentId, int PostId, int UserId, string AuthorName, int? ParentCommentId, string Content, string Status, IReadOnlyCollection<CommentResponse> Replies, DateTime CreatedAt, DateTime UpdatedAt);
 public record RatingRequest([Range(1, 5)] int Rating);
 public record IngredientRequest([Required, MaxLength(200)] string IngredientName, string? Amount, [Required, MaxLength(30)] string DietaryGroup, int? AllergenId);
 public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber, [Required] string Instruction);
-public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, int? CategoryId, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, [Range(1, 5000)] decimal? CaloriesPerServing, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, List<int>? TagIds);
-public record RecipeResponse(int PostId, string Title, string Content, string Status, decimal? Servings, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds);
+public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, int? CategoryId, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, [Range(1, 5000)] decimal? CaloriesPerServing, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, List<int>? TagIds, [Required, MaxLength(250)] string RecipeName);
+public record RecipeResponse(int PostId, string Title, string Content, string Status, string? VideoUrl, string? ThumbnailUrl, int? PrepMinutes, int? CookMinutes, decimal? Servings, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds, string RecipeName);
 public record GenerateMealPlanRequest(DateTime? StartDate, string? AvailableIngredients);
-public record MealPlanMealResponse(int DayNumber, string MealType, int RecipeId, string RecipeTitle, decimal? PlannedCalories);
-public record MealPlanResponse(int MealPlanId, DateTime StartDate, decimal? BMI, decimal? BMR, decimal? TDEE, decimal? TargetCaloriesPerDay, string? HealthGoal, IReadOnlyCollection<MealPlanMealResponse> Meals);
+public record MealPlanMealResponse(int MealPlanMealId, int DayNumber, string MealType, int RecipeId, string RecipeName);
+public record MealPlanResponse(int MealPlanId, DateTime StartDate, decimal? BMI, string? BmiCategory, IReadOnlyCollection<MealPlanMealResponse> Meals);
+public record AiMealResponse(int Day, string MealType, int RecipeId);
 public record CreateChatSessionRequest();
 public record ChatMessageRequest([Required, MaxLength(1000)] string Content);
 public record ChatMessageResponse(int ChatMessageId, string Sender, string Content, DateTime CreatedAt);
@@ -63,10 +66,10 @@ public record RelatedRecipeResponse(int RecipeId, string Title);
 public record ChatReplyResponse(int? ChatMessageId, string? Answer, IReadOnlyCollection<RelatedRecipeResponse> RelatedRecipes, IReadOnlyCollection<string> Sources, int? RemainingGuestMessages, bool SignupRequired);
 public record ChatSessionResponse(int ChatSessionId, int? UserId, DateTime CreatedAt, IReadOnlyCollection<ChatMessageResponse> Messages, string? GuestAccessToken = null);
 public record IngredientRecognitionResponse(string IngredientName, decimal Confidence, string FreshnessAssessment, IReadOnlyCollection<string> SuggestedRecipes);
-public record VideoRecipeDraftResponse(int VideoRecipeDraftId, string Status, string VideoUrl, string? Title, string? Description, string? Transcript, int? EstimatedPrepMinutes, decimal? Servings, int? CategoryId, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, string? ErrorMessage, DateTime CreatedAt, DateTime UpdatedAt);
-public record UpdateVideoRecipeDraftRequest([Required, MaxLength(250)] string Title, [Required] string Description, string? Transcript, [Range(1, int.MaxValue)] int? EstimatedPrepMinutes, [Range(0.01, 1000)] decimal? Servings, int? CategoryId, [Range(1, 5000)] decimal? CaloriesPerServing, [Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps);
-public record PublishVideoRecipeDraftRequest(int? CategoryId, List<int>? TagIds);
+public record VideoRecipeDraftResponse(int VideoRecipeDraftId, string Status, string VideoUrl, string? Title, string? Description, string? Transcript, int? EstimatedPrepMinutes, decimal? Servings, int? CategoryId, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, string? ErrorMessage, DateTime CreatedAt, DateTime UpdatedAt, string? RecipeName = null);
+public record UpdateVideoRecipeDraftRequest([Required, MaxLength(250)] string Title, [Required] string Description, string? Transcript, [Range(1, int.MaxValue)] int? EstimatedPrepMinutes, [Range(0.01, 1000)] decimal? Servings, int? CategoryId, [Range(1, 5000)] decimal? CaloriesPerServing, [Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps, [MaxLength(250)] string? RecipeName = null);
+public record PublishVideoRecipeDraftRequest(int? CategoryId, List<int>? TagIds, [Required, MaxLength(250)] string RecipeName);
 public record ReportRequest([Required, MaxLength(500)] string Reason);
 public record ModerationFlagResponse(int FlagId, int? PostId, int? CommentId, string Source, string? Reason, string Status, int? ReportedBy, int? ReviewedBy);
 public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
-    [Range(1, int.MaxValue)] int? EstimatedPrepMinutes,[Range(0.01, 1000)] decimal? Servings,int? CategoryId, [Range(1, 5000)] decimal? CaloriesPerServing,[Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps);
+    [Range(1, int.MaxValue)] int? EstimatedPrepMinutes,[Range(0.01, 1000)] decimal? Servings,int? CategoryId, [Range(1, 5000)] decimal? CaloriesPerServing,[Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps, [MaxLength(250)] string? RecipeName = null);

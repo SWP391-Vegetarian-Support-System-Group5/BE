@@ -1,6 +1,6 @@
 namespace BLL.Common;
 
-public class ServiceException(string message, int statusCode = 400, IEnumerable<string>? errors = null) : Exception(message)
+public class ServiceException(string message, int statusCode = 400, IEnumerable<string>? errors = null, Exception? innerException = null) : Exception(message, innerException)
 {
     public int StatusCode { get; } = statusCode;
     public IReadOnlyCollection<string> Errors { get; } = errors?.ToArray() ?? Array.Empty<string>();

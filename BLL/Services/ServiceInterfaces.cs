@@ -80,7 +80,8 @@ public interface IReferenceDataAndRestaurantService
 public interface IPostService
 {
     Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, int? tagId, string? status, bool isAdmin, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, int? tagId, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<PostResponse>> GetMineAsync(int userId, CancellationToken cancellationToken = default);
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
@@ -112,6 +113,8 @@ public interface IMealPlanService
     Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<MealPlanResponse>> GetAsync(int userId, CancellationToken cancellationToken = default);
     Task<MealPlanResponse> GetByIdAsync(int id, int userId, string role, CancellationToken cancellationToken = default);
+    Task<MealPlanResponse> RegenerateAsync(int id, int userId, GenerateMealPlanRequest request, CancellationToken cancellationToken = default);
+    Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default);
 }
 
@@ -141,6 +144,12 @@ public interface IVideoRecipeDraftService
     Task<VideoRecipeDraftResponse> CreateManualAsync(int userId, Stream videoStream, string fileName, string contentType, CreateManualVideoRecipeDraftRequest request, CancellationToken ct = default);
 }
 public interface IModerationAiService { Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default); }
+
+public record CommunityEvent(string Type, int? PostId, PostResponse? Post = null, CommentResponse? Comment = null, double? AverageRating = null, int? RatingCount = null, int? CommentCount = null);
+public interface ICommunityEventPublisher
+{
+    Task PublishAsync(CommunityEvent communityEvent, CancellationToken cancellationToken = default);
+}
 
 public interface IModerationService
 {

@@ -184,7 +184,7 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         CancellationToken cancellationToken)
     {
         var safeRadiusKm = Math.Clamp(radiusKm, 1m, 25m);
-        var cacheKey = $"map:nearby:{Round(latitude)}:{Round(longitude)}:{safeRadiusKm}:{provinceCode}:{areaCode}";
+        var cacheKey = $"map:nearby:v2:{Round(latitude)}:{Round(longitude)}:{safeRadiusKm}:{provinceCode}:{areaCode}";
         if (cache.TryGetValue(cacheKey, out NearbyPlaceResponse[]? cached) && cached is not null) return cached;
 
         try
@@ -208,8 +208,8 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         var lon = longitude.ToString(CultureInfo.InvariantCulture);
         var query = $"""
             [out:json][timeout:25];(
-              nwr["amenity"~"restaurant|cafe|fast_food"]["diet:vegetarian"="yes"](around:{radiusMetres},{lat},{lon});
-              nwr["amenity"~"restaurant|cafe|fast_food"]["diet:vegan"="yes"](around:{radiusMetres},{lat},{lon});
+              nwr["amenity"~"restaurant|cafe|fast_food"]["diet:vegetarian"~"^(yes|only)$"](around:{radiusMetres},{lat},{lon});
+              nwr["amenity"~"restaurant|cafe|fast_food"]["diet:vegan"~"^(yes|only)$"](around:{radiusMetres},{lat},{lon});
               nwr["amenity"~"restaurant|cafe|fast_food"]["cuisine"~"vegetarian|vegan",i](around:{radiusMetres},{lat},{lon});
             );out center tags;
             """;
@@ -226,8 +226,7 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            // Both providers can occasionally be busy; an empty result keeps the map itself usable.
-            return [];
+            throw new HttpRequestException("OpenStreetMap restaurant data is temporarily unavailable.", exception);
         }
 
         var unique = new Dictionary<string, NearbyPlaceResponse>(StringComparer.Ordinal);
@@ -241,7 +240,7 @@ public sealed class OpenStreetMapService(IHttpClientFactory httpClientFactory, I
             unique[id] = new NearbyPlaceResponse(
                 id,
                 Value(tags, "name") ?? Value(tags, "name:vi") ?? "Địa điểm chay",
-                Value(tags, "diet:vegan") == "yes" ? "Vegan" : "Vegetarian",
+                Value(tags, "diet:vegan") is "yes" or "only" ? "Vegan" : "Vegetarian",
                 FormatAddress(tags),
                 provinceCode,
                 areaCode,
