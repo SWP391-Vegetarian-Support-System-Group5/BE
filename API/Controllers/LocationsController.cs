@@ -2,10 +2,12 @@ using BLL.DTOs;
 using BLL.Services;
 using API.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace API.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/locations")]
 public sealed class LocationsController(ILocationService locationService, IOpenStreetMapService mapService) : ControllerBase
 {

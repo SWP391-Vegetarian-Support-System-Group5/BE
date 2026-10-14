@@ -12,8 +12,8 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
     {
         var profile = await profiles.Query().Include(x => x.User).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             ?? throw new ServiceException("User profile was not found.", 404);
-        if (request.DietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == request.DietTypeId.Value, cancellationToken))
-            throw new ServiceException("Diet type was not found.", 404);
+        if (request.DietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == request.DietTypeId.Value && x.IsActive, cancellationToken))
+            throw new ServiceException("Diet type was not found or is inactive.", 404);
 
         profile.FullName = request.FullName.Trim();
         profile.Sex = string.IsNullOrWhiteSpace(request.Sex) ? null : FixedValues.Sex(request.Sex);
