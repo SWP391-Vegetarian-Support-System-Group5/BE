@@ -1,9 +1,9 @@
 .git
 .github
 .vs
+**/.local
 **/bin
 **/obj
-**/.local
 **/node_modules
 **/.env
 **/.env.*
@@ -14,3 +14,6 @@
 **/*.pfx
 **/*.p12
 API/Properties/launchSettings.json
+Tests
+Database
+scripts

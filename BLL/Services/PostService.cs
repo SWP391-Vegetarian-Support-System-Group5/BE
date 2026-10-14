@@ -11,7 +11,6 @@ public class PostService(
     IRepository<Comment> comments,
     IRepository<PostRating> ratings,
     IRepository<Bookmark> bookmarks,
-    IRepository<Tag> tags,
     IRepository<Category> categories,
     IRepository<ModerationFlag> moderationFlags,
     IModerationAiService moderationAiService,
@@ -19,28 +18,27 @@ public class PostService(
 {
     public async Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default)
     {
-        await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
+        await ValidateCategoryAsync(request.CategoryId, cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
         var post = new Post { UserId = userId, CategoryId = request.CategoryId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
-        await SetTagsAsync(post, request.TagIds, cancellationToken);
         await CreateAiPostFlagAsync(post.PostId, post.Content, cancellationToken);
         var response = await GetByIdAsync(post.PostId, userId, "USER", cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: response), cancellationToken);
         return response;
     }
 
-    public async Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, int? tagId, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default)
     {
         var query = BaseQuery();
         if (!isAdmin) query = query.Where(x => x.Status == "PUBLISHED");
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
-        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term) || (x.Category != null && x.Category.Name.ToLower().Contains(term)) || x.PostTags.Any(pt => pt.Tag.Name.ToLower().Contains(term))); }
-        if (categoryId.HasValue) query = query.Where(x => x.CategoryId == categoryId);
+        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term) || (x.Category != null && x.Category.Name.ToLower().Contains(term))); }
+        if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
+        if (!string.IsNullOrWhiteSpace(categoryType)) { var type = RecipeCategoryService.ValidateType(categoryType); query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.Category.Type == type && m.Category.IsActive)); }
         if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
-        if (tagId.HasValue) query = query.Where(x => x.PostTags.Any(pt => pt.TagId == tagId));
         query = query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
         if (limit is > 0) query = query.Take(limit.Value);
         return (await query.ToListAsync(cancellationToken)).Select(x => ToResponse(x, actorId)).ToList();
@@ -64,11 +62,11 @@ public class PostService(
     {
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
-        await ValidateCategoryAndTagsAsync(request.CategoryId, request.TagIds, cancellationToken);
+        await ValidateCategoryAsync(request.CategoryId, cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.CategoryId = request.CategoryId; post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); post.UpdatedAt = VietnamTime.Now;
         if (!string.IsNullOrWhiteSpace(request.Status) && role == "ADMIN") post.Status = FixedValues.PostStatus(request.Status);
-        await posts.SaveChangesAsync(cancellationToken); await SetTagsAsync(post, request.TagIds, cancellationToken);
+        await posts.SaveChangesAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postUpdated", id, Post: await GetByIdAsync(id, actorId, role, cancellationToken)), cancellationToken);
     }
 
@@ -162,20 +160,10 @@ public class PostService(
     public async Task<IReadOnlyCollection<PostResponse>> GetBookmarksAsync(int userId, CancellationToken cancellationToken = default) =>
         (await BaseQuery().Where(x => x.Bookmarks.Any(b => b.UserId == userId)).ToListAsync(cancellationToken)).Select(x => ToResponse(x, userId)).ToList();
 
-    private IQueryable<Post> BaseQuery() => posts.Query().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Category).Include(x => x.PostTags).ThenInclude(x => x.Tag).Include(x => x.Ratings).Include(x => x.Comments);
-    private async Task SetTagsAsync(Post post, List<int>? tagIds, CancellationToken ct)
-    {
-        var ids = (tagIds ?? []).Distinct().ToHashSet();
-        var current = await posts.Query().Include(x => x.PostTags).SingleAsync(x => x.PostId == post.PostId, ct);
-        current.PostTags.Clear();
-        foreach (var id in ids) current.PostTags.Add(new PostTag { PostId = post.PostId, TagId = id });
-        await posts.SaveChangesAsync(ct);
-    }
-    private async Task ValidateCategoryAndTagsAsync(int? categoryId, List<int>? tagIds, CancellationToken ct)
+    private IQueryable<Post> BaseQuery() => posts.Query().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Category).Include(x => x.Ratings).Include(x => x.Comments);
+    private async Task ValidateCategoryAsync(int? categoryId, CancellationToken ct)
     {
         if (categoryId.HasValue && !await categories.Query().AnyAsync(x => x.CategoryId == categoryId.Value, ct)) throw new ServiceException("Category was not found.", 404);
-        var ids = (tagIds ?? []).Distinct().ToHashSet();
-        if (ids.Count > 0 && await tags.Query().CountAsync(x => ids.Contains(x.TagId), ct) != ids.Count) throw new ServiceException("One or more tags were not found.", 404);
     }
     private static PostResponse ToResponse(Post x, int? actorId = null) => new(
         x.PostId,
@@ -189,7 +177,6 @@ public class PostService(
         x.VideoUrl,
         x.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl),
         x.Status,
-        x.PostTags.Select(pt => pt.Tag.Name).ToList(),
         x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating),
         x.Ratings.Count,
         x.Comments.Count(c => c.Status == "PUBLISHED"),
