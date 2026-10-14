@@ -1,0 +1,16 @@
+.git
+.github
+.vs
+**/bin
+**/obj
+**/.local
+**/node_modules
+**/.env
+**/.env.*
+**/*.env
+**/*.user
+**/*.suo
+**/*.log
+**/*.pfx
+**/*.p12
+API/Properties/launchSettings.json
