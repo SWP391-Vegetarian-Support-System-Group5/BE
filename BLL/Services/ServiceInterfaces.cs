@@ -57,16 +57,12 @@ public interface IReferenceDataAndRestaurantService
     Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CatalogItemResponse>> GetCategoriesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<CatalogItemResponse>> GetTagsAsync(CancellationToken cancellationToken = default);
     Task<CatalogItemResponse> CreateCategoryAsync(CategoryRequest request, CancellationToken cancellationToken = default);
     Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default);
-    Task<CatalogItemResponse> CreateTagAsync(TagRequest request, CancellationToken cancellationToken = default);
     Task UpdateCategoryAsync(int id, CategoryRequest request, CancellationToken cancellationToken = default);
     Task UpdateAllergenAsync(int id, AllergenRequest request, CancellationToken cancellationToken = default);
-    Task UpdateTagAsync(int id, TagRequest request, CancellationToken cancellationToken = default);
     Task DeleteCategoryAsync(int id, CancellationToken cancellationToken = default);
     Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default);
-    Task DeleteTagAsync(int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default);
     Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken cancellationToken = default);
@@ -80,7 +76,7 @@ public interface IReferenceDataAndRestaurantService
 public interface IPostService
 {
     Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, int? tagId, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<PostResponse>> GetMineAsync(int userId, CancellationToken cancellationToken = default);
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);
@@ -105,7 +101,7 @@ public interface IRecipeService
     Task<RecipeResponse> GetAsync(int id, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, CreateRecipeRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, int? tagId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, CancellationToken cancellationToken = default);
 }
 
 public interface IMealPlanService

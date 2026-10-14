@@ -39,7 +39,8 @@ public class SeedService(
     IRepository<Recipe> recipes,
     IRepository<RecipeIngredient> recipeIngredients,
     IRepository<RecipeStep> recipeSteps,
-    IRepository<RecipeDietCompatibility> recipeDietCompatibilities) : ISeedService
+    IRepository<RecipeDietCompatibility> recipeDietCompatibilities,
+    RecipeCategoryService recipeCategories) : ISeedService
 {
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
@@ -53,6 +54,7 @@ public class SeedService(
             await users.SaveChangesAsync(cancellationToken);
         }
         await SeedRecipeCatalogAsync(cancellationToken);
+        await recipeCategories.SeedAsync(cancellationToken);
     }
     private static async Task AddMissingAsync<T>(IRepository<T> repository, IEnumerable<string> names, Func<string, T> create, Func<T, string> getName, CancellationToken ct) where T : class
     {

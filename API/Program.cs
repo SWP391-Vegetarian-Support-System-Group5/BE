@@ -170,6 +170,7 @@ if (runDatabaseStartupTasks)
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }

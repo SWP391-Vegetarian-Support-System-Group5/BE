@@ -15,13 +15,6 @@ public class ReferenceDataController(IReferenceDataAndRestaurantService referenc
     [HttpGet("categories")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetCategories(CancellationToken ct) => referenceDataService.GetCategoriesAsync(ct);
     [Authorize]
     [HttpGet("allergens")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergens(CancellationToken ct) => referenceDataService.GetAllergensAsync(ct);
-    [HttpGet("tags")] public Task<IReadOnlyCollection<CatalogItemResponse>> GetTags(CancellationToken ct) => referenceDataService.GetTagsAsync(ct);
-    [Authorize(Roles = "ADMIN")]
-    [HttpPost("tags")] public async Task<ActionResult<CatalogItemResponse>> CreateTag(TagRequest request, CancellationToken ct) => Created("/api/tags", await referenceDataService.CreateTagAsync(request, ct));
-    [Authorize(Roles = "ADMIN")]
-    [HttpPut("tags/{id:int}")] public async Task<IActionResult> UpdateTag(int id, TagRequest request, CancellationToken ct) { await referenceDataService.UpdateTagAsync(id, request, ct); return NoContent(); }
-    [Authorize(Roles = "ADMIN")]
-    [HttpDelete("tags/{id:int}")] public async Task<IActionResult> DeleteTag(int id, CancellationToken ct) { await referenceDataService.DeleteTagAsync(id, ct); return NoContent(); }
 
     [Authorize]
     [HttpGet("restaurants")] public Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurants([FromQuery] string? food, CancellationToken ct) => referenceDataService.GetRestaurantsAsync(food, ct);

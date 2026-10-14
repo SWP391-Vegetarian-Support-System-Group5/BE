@@ -40,6 +40,7 @@ public static class VegetarianDietRules
     public static IReadOnlyCollection<string> GetCompatibleDietTypes(IEnumerable<string> ingredientGroups)
     {
         var groups = ingredientGroups.ToHashSet(StringComparer.Ordinal);
+        if (!IsVerifiedVegetarianRecipe(groups)) return [];
         return AllowedGroupsByDietType
             .Where(rule => groups.All(group => rule.Value.Contains(group, StringComparer.Ordinal)))
             .Select(rule => rule.Key)

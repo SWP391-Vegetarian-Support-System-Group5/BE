@@ -10,14 +10,12 @@ public class ReferenceDataAndRestaurantService(
     IRepository<DietType> dietTypes,
     IRepository<Category> categories,
     IRepository<Allergen> allergens,
-    IRepository<Tag> tags,
     IRepository<Restaurant> restaurants,
     IRepository<RestaurantFood> restaurantFoods,
     IRepository<Post> posts,
     IRepository<RestaurantReview> restaurantReviews,
     IRepository<UserAllergen> userAllergens,
-    IRepository<RecipeIngredient> recipeIngredients,
-    IRepository<PostTag> postTags) : IReferenceDataAndRestaurantService
+    IRepository<RecipeIngredient> recipeIngredients) : IReferenceDataAndRestaurantService
 {
     public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
         (await dietTypes.Query().OrderBy(x => x.Name).ToListAsync(cancellationToken))
@@ -27,9 +25,6 @@ public class ReferenceDataAndRestaurantService(
         await categories.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.CategoryId, x.Name, x.Type)).ToListAsync(cancellationToken);
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default) =>
         await allergens.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.AllergenId, x.Name, null)).ToListAsync(cancellationToken);
-    public async Task<IReadOnlyCollection<CatalogItemResponse>> GetTagsAsync(CancellationToken cancellationToken = default) =>
-        await tags.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.TagId, x.Name, null)).ToListAsync(cancellationToken);
-
     public async Task<CatalogItemResponse> CreateCategoryAsync(CategoryRequest request, CancellationToken cancellationToken = default)
     {
         var entity = new Category { Name = request.Name.Trim(), Type = FixedValues.CategoryType(request.Type) };
@@ -43,13 +38,6 @@ public class ReferenceDataAndRestaurantService(
         await allergens.AddAsync(entity, cancellationToken); await allergens.SaveChangesAsync(cancellationToken);
         return new(entity.AllergenId, entity.Name);
     }
-    public async Task<CatalogItemResponse> CreateTagAsync(TagRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = new Tag { Name = request.Name.Trim() };
-        await EnsureUniqueAsync(tags.Query(), entity.Name, x => x.Name, cancellationToken);
-        await tags.AddAsync(entity, cancellationToken); await tags.SaveChangesAsync(cancellationToken);
-        return new(entity.TagId, entity.Name);
-    }
 
     public async Task UpdateCategoryAsync(int id, CategoryRequest request, CancellationToken cancellationToken = default)
     {
@@ -60,12 +48,6 @@ public class ReferenceDataAndRestaurantService(
         var entity = await RequireAsync(allergens, id, cancellationToken); var name = request.Name.Trim();
         if (!string.Equals(entity.Name, name, StringComparison.OrdinalIgnoreCase)) await EnsureUniqueAsync(allergens.Query().Where(x => x.AllergenId != id), name, x => x.Name, cancellationToken);
         entity.Name = name; await allergens.SaveChangesAsync(cancellationToken);
-    }
-    public async Task UpdateTagAsync(int id, TagRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = await RequireAsync(tags, id, cancellationToken); var name = request.Name.Trim();
-        if (!string.Equals(entity.Name, name, StringComparison.OrdinalIgnoreCase)) await EnsureUniqueAsync(tags.Query().Where(x => x.TagId != id), name, x => x.Name, cancellationToken);
-        entity.Name = name; await tags.SaveChangesAsync(cancellationToken);
     }
 
     public async Task DeleteCategoryAsync(int id, CancellationToken cancellationToken = default)
@@ -79,12 +61,6 @@ public class ReferenceDataAndRestaurantService(
         await RequireAsync(allergens, id, cancellationToken);
         if (await userAllergens.Query().AnyAsync(x => x.AllergenId == id, cancellationToken) || await recipeIngredients.Query().AnyAsync(x => x.AllergenId == id, cancellationToken)) throw new ServiceException("Allergen is in use and cannot be deleted.", 409);
         await DeleteAsync(allergens, id, cancellationToken);
-    }
-    public async Task DeleteTagAsync(int id, CancellationToken cancellationToken = default)
-    {
-        await RequireAsync(tags, id, cancellationToken);
-        if (await postTags.Query().AnyAsync(x => x.TagId == id, cancellationToken)) throw new ServiceException("Tag is in use and cannot be deleted.", 409);
-        await DeleteAsync(tags, id, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default)
