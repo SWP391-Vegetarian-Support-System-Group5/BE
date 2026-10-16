@@ -72,6 +72,7 @@ public interface IReferenceDataAndRestaurantService
     Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default);
     Task UpdateRestaurantStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RestaurantFoodResponse>> GetRestaurantFoodsAsync(int restaurantId, bool includeUnavailable = false, CancellationToken cancellationToken = default);
     Task<RestaurantFoodResponse> CreateRestaurantFoodAsync(int restaurantId, RestaurantFoodRequest request, CancellationToken cancellationToken = default);
     Task<RestaurantFoodResponse> UpdateRestaurantFoodAsync(int restaurantId, int foodId, RestaurantFoodRequest request, CancellationToken cancellationToken = default);
     Task DeleteRestaurantFoodAsync(int restaurantId, int foodId, CancellationToken cancellationToken = default);

@@ -8,3 +8,5 @@
 .aiven.env
 **/.env
 .local/
+# Uploaded media is runtime data and must not be committed to source control.
+API/wwwroot/uploads/

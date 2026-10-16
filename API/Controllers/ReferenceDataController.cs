@@ -23,6 +23,8 @@ public class ReferenceDataController(IReferenceDataAndRestaurantService referenc
     [Authorize]
     [HttpGet("restaurants/{id:int}")] public async Task<ActionResult<RestaurantResponse>> GetRestaurant(int id, CancellationToken ct) => (await referenceDataService.GetRestaurantAsync(id, false, ct)) is { } restaurant ? Ok(restaurant) : NotFound();
     [Authorize]
+    [HttpGet("restaurants/{restaurantId:int}/foods")] public Task<IReadOnlyCollection<RestaurantFoodResponse>> GetRestaurantFoods(int restaurantId, CancellationToken ct) => referenceDataService.GetRestaurantFoodsAsync(restaurantId, false, ct);
+    [Authorize]
     [HttpPost("restaurants/{restaurantId:int}/reviews")] public async Task<ActionResult<RestaurantReviewResponse>> CreateReview(int restaurantId, RestaurantReviewRequest request, CancellationToken ct) => Created($"/api/restaurants/{restaurantId}/reviews", await referenceDataService.CreateRestaurantReviewAsync(restaurantId, User.GetRequiredUserId(), request, ct));
     [Authorize]
     [HttpGet("restaurants/{restaurantId:int}/reviews")] public Task<IReadOnlyCollection<RestaurantReviewResponse>> GetReviews(int restaurantId, CancellationToken ct) => referenceDataService.GetRestaurantReviewsAsync(restaurantId, ct);

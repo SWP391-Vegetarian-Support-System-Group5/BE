@@ -49,6 +49,14 @@ public class RecipeCategoryService(VegetarianDbContext db)
         if (type == "DIETARY_TYPE") await BackfillDietaryAsync(ct);
         return ToResponse(category);
     }
+    public async Task<RecipeCategoryResponse> SetStatusAsync(int id, bool isActive, CancellationToken ct)
+    {
+        var category = await db.RecipeCategories.FindAsync([id], ct) ?? throw new ServiceException("Category not found.", 404);
+        category.IsActive = isActive;
+        await db.SaveChangesAsync(ct);
+        if (category.Type == "DIETARY_TYPE") await BackfillDietaryAsync(ct);
+        return ToResponse(category);
+    }
     public async Task ValidateSelectionAsync(IEnumerable<int>? ids, IEnumerable<string> groups, CancellationToken ct)
     {
         groups = groups.Select(VegetarianDietRules.NormalizeIngredientGroup).ToArray();

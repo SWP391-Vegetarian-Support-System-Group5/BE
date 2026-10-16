@@ -21,4 +21,8 @@ public class RecipeCategoriesController(RecipeCategoryService service) : Control
     [Authorize(Roles = "ADMIN")]
     [HttpPut("{id:int}")]
     public Task<RecipeCategoryResponse> Update(int id, RecipeCategoryRequest request, CancellationToken ct) => service.SaveAsync(id, request, ct);
+
+    [Authorize(Roles = "ADMIN")]
+    [HttpPut("{id:int}/status")]
+    public Task<RecipeCategoryResponse> UpdateStatus(int id, UpdateCatalogStatusRequest request, CancellationToken ct) => service.SetStatusAsync(id, request.IsActive, ct);
 }

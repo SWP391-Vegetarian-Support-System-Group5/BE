@@ -76,6 +76,12 @@ public record RestaurantResponse(
     string? ImageUrl = null,
     bool IsActive = true,
     IReadOnlyCollection<RestaurantFoodResponse>? FoodDetails = null);
+public record UnifiedSearchResponse(
+    string Keyword,
+    IReadOnlyCollection<RestaurantResponse> Restaurants,
+    IReadOnlyCollection<RecipeResponse> Recipes,
+    IReadOnlyCollection<PostResponse> Posts);
+public record ImageUploadResponse(string Url, string FileName, long Size, string ContentType);
 public record RestaurantReviewRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Range(1, 5)] int Rating);
 public record RestaurantReviewResponse(int PostId, int RestaurantId, int UserId, string Title, string Content, int Rating);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, int? CategoryId, string? VideoUrl);

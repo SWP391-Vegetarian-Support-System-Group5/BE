@@ -122,6 +122,16 @@ public class ReferenceDataAndRestaurantService(
         await restaurants.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<RestaurantFoodResponse>> GetRestaurantFoodsAsync(int restaurantId, bool includeUnavailable = false, CancellationToken cancellationToken = default)
+    {
+        if (!await restaurants.Query().AnyAsync(x => x.RestaurantId == restaurantId, cancellationToken)) throw new ServiceException("Restaurant was not found.", 404);
+        return await restaurantFoods.Query()
+            .Where(x => x.RestaurantId == restaurantId && (includeUnavailable || x.IsAvailable))
+            .OrderBy(x => x.FoodName)
+            .Select(x => new RestaurantFoodResponse(x.RestaurantFoodId, x.FoodName, x.Description, x.ImageUrl, x.Price, x.DietTypeId, x.IsAvailable))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<RestaurantFoodResponse> CreateRestaurantFoodAsync(int restaurantId, RestaurantFoodRequest request, CancellationToken cancellationToken = default)
     {
         if (!await restaurants.Query().AnyAsync(x => x.RestaurantId == restaurantId, cancellationToken)) throw new ServiceException("Restaurant was not found.", 404);
