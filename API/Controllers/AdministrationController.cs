@@ -9,7 +9,7 @@ namespace API.Controllers;
 [ApiController]
 [Authorize(Roles = "ADMIN")]
 [Route("api/admin")]
-public class AdministrationController(IUserAdministrationService userAdministrationService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService) : ControllerBase
+public class AdministrationController(IUserAdministrationService userAdministrationService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService, IngredientCatalogService ingredientCatalog) : ControllerBase
 {
     [HttpGet("users")] public Task<IReadOnlyCollection<UserResponse>> GetUsers(CancellationToken ct) => userAdministrationService.GetUsersAsync(ct);
     [HttpGet("users/{id:int}")] public Task<UserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
@@ -20,10 +20,8 @@ public class AdministrationController(IUserAdministrationService userAdministrat
     [HttpDelete("posts/{id:int}")] public async Task<IActionResult> DeletePost(int id, CancellationToken ct) { await postService.DeleteAsync(id, User.GetRequiredUserId(), "ADMIN", ct); return NoContent(); }
     [HttpGet("comments")] public Task<IReadOnlyCollection<CommentResponse>> GetComments(CancellationToken ct) => postService.GetAllCommentsAsync(ct);
     [HttpDelete("comments/{id:int}")] public async Task<IActionResult> DeleteComment(int id, CancellationToken ct) { await postService.DeleteCommentAsync(id, User.GetRequiredUserId(), "ADMIN", ct); return NoContent(); }
+    [HttpPut("ingredients/{id:int}")] public Task<IngredientResponse> UpdateIngredient(int id, UpdateIngredientRequest request, CancellationToken ct) => ingredientCatalog.UpdateAsync(id, request, ct);
 
-    [HttpPost("categories")] public async Task<ActionResult<CatalogItemResponse>> CreateCategory(CategoryRequest request, CancellationToken ct) => Created("/api/categories", await referenceDataService.CreateCategoryAsync(request, ct));
-    [HttpPut("categories/{id:int}")] public async Task<IActionResult> UpdateCategory(int id, CategoryRequest request, CancellationToken ct) { await referenceDataService.UpdateCategoryAsync(id, request, ct); return NoContent(); }
-    [HttpDelete("categories/{id:int}")] public async Task<IActionResult> DeleteCategory(int id, CancellationToken ct) { await referenceDataService.DeleteCategoryAsync(id, ct); return NoContent(); }
     [HttpPost("allergens")] public async Task<ActionResult<CatalogItemResponse>> CreateAllergen(AllergenRequest request, CancellationToken ct) => Created("/api/allergens", await referenceDataService.CreateAllergenAsync(request, ct));
     [HttpPut("allergens/{id:int}")] public async Task<IActionResult> UpdateAllergen(int id, AllergenRequest request, CancellationToken ct) { await referenceDataService.UpdateAllergenAsync(id, request, ct); return NoContent(); }
     [HttpDelete("allergens/{id:int}")] public async Task<IActionResult> DeleteAllergen(int id, CancellationToken ct) { await referenceDataService.DeleteAllergenAsync(id, ct); return NoContent(); }

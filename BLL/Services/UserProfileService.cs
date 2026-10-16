@@ -21,7 +21,6 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
         profile.HeightCm = request.HeightCm;
         profile.WeightKg = request.WeightKg;
         profile.ActivityLevel = string.IsNullOrWhiteSpace(request.ActivityLevel) ? null : FixedValues.ActivityLevel(request.ActivityLevel);
-        profile.HealthGoal = string.IsNullOrWhiteSpace(request.HealthGoal) ? null : FixedValues.HealthGoal(request.HealthGoal);
         profile.DietTypeId = request.DietTypeId;
         profile.Latitude = request.Latitude;
         profile.Longitude = request.Longitude;

@@ -171,12 +171,13 @@ if (runDatabaseStartupTasks)
     var services = scope.ServiceProvider;
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }
 else
 {
-    Console.WriteLine("Database migration and seed are disabled. Database-backed endpoints are unavailable.");
+    Console.WriteLine("Startup migration, seed, and the video-processing worker are disabled. API database access remains enabled.");
 }
 
 app.Run();

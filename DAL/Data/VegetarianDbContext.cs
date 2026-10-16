@@ -9,12 +9,13 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<EmailOtpCode> EmailOtpCodes => Set<EmailOtpCode>();
     public DbSet<DietType> DietTypes => Set<DietType>();
-    public DbSet<Category> Categories => Set<Category>();
     public DbSet<Post> Posts => Set<Post>();
     public DbSet<Comment> Comments => Set<Comment>();
     public DbSet<PostRating> PostRatings => Set<PostRating>();
     public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<IngredientCategory> IngredientCategories => Set<IngredientCategory>();
+    public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<RecipeCategory> RecipeCategories => Set<RecipeCategory>();
     public DbSet<RecipeCategoryMapping> RecipeCategoryMappings => Set<RecipeCategoryMapping>();
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
@@ -23,7 +24,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<Allergen> Allergens => Set<Allergen>();
     public DbSet<UserAllergen> UserAllergens => Set<UserAllergen>();
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
-    public DbSet<RestaurantReview> RestaurantReviews => Set<RestaurantReview>();
     public DbSet<RestaurantFood> RestaurantFoods => Set<RestaurantFood>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
     public DbSet<MealPlanMeal> MealPlanMeals => Set<MealPlanMeal>();
@@ -39,6 +39,23 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         ConfigureUsers(modelBuilder);
         ConfigureContent(modelBuilder);
         ConfigureRecipes(modelBuilder);
+        modelBuilder.Entity<IngredientCategory>(entity =>
+        {
+            entity.ToTable("IngredientCategories");
+            entity.HasKey(x => x.IngredientCategoryId);
+            entity.Property(x => x.Code).HasMaxLength(30).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.HasIndex(x => x.Code).IsUnique();
+        });
+        modelBuilder.Entity<Ingredient>(entity =>
+        {
+            entity.ToTable("Ingredients");
+            entity.HasKey(x => x.IngredientId);
+            entity.Property(x => x.Name).HasMaxLength(200).UseCollation("utf8mb4_0900_as_ci").IsRequired();
+            entity.HasIndex(x => x.Name).IsUnique();
+            entity.HasOne(x => x.Category).WithMany(x => x.Ingredients).HasForeignKey(x => x.IngredientCategoryId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Allergen).WithMany(x => x.Ingredients).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.NoAction);
+        });
         modelBuilder.Entity<RecipeCategory>(entity =>
         {
             entity.ToTable("RecipeCategories");
@@ -88,7 +105,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.HeightCm).HasPrecision(5, 2);
             entity.Property(x => x.WeightKg).HasPrecision(6, 2);
             entity.Property(x => x.ActivityLevel).HasMaxLength(30).IsUnicode(false);
-            entity.Property(x => x.HealthGoal).HasMaxLength(30).IsUnicode(false);
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
             entity.HasOne(x => x.DietType).WithMany(x => x.UserProfiles).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
@@ -133,14 +149,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
 
     private static void ConfigureContent(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Category>(entity =>
-        {
-            entity.ToTable("Categories");
-            entity.HasKey(x => x.CategoryId);
-            entity.Property(x => x.Name).HasMaxLength(150).IsRequired();
-            entity.Property(x => x.Type).HasMaxLength(30).IsUnicode(false).IsRequired();
-        });
-
         modelBuilder.Entity<Post>(entity =>
         {
             entity.ToTable("Posts");
@@ -154,7 +162,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.User).WithMany(x => x.Posts).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
-            entity.HasOne(x => x.Category).WithMany(x => x.Posts).HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<Comment>(entity =>
@@ -207,11 +214,9 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         {
             entity.ToTable("RecipeIngredients");
             entity.HasKey(x => x.RecipeIngredientId);
-            entity.Property(x => x.IngredientName).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Amount).HasMaxLength(100);
-            entity.Property(x => x.DietaryGroup).HasMaxLength(30).IsUnicode(false).IsRequired().HasDefaultValue("UNVERIFIED");
             entity.HasOne(x => x.Recipe).WithMany(x => x.Ingredients).HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.NoAction);
-            entity.HasOne(x => x.Allergen).WithMany(x => x.RecipeIngredients).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Ingredient).WithMany(x => x.Recipes).HasForeignKey(x => x.IngredientId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<RecipeStep>(entity =>
@@ -253,14 +258,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasOne(x => x.Restaurant).WithMany(x => x.Foods).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.NoAction);
         });
 
-        modelBuilder.Entity<RestaurantReview>(entity =>
-        {
-            entity.ToTable("RestaurantReviews");
-            entity.HasKey(x => x.PostId);
-            entity.Property(x => x.Rating).IsRequired();
-            entity.HasOne(x => x.Post).WithOne(x => x.RestaurantReview).HasForeignKey<RestaurantReview>(x => x.PostId).OnDelete(DeleteBehavior.NoAction);
-            entity.HasOne(x => x.Restaurant).WithMany(x => x.Reviews).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.NoAction);
-        });
     }
 
     private static void ConfigureMealPlans(ModelBuilder modelBuilder)
@@ -318,7 +315,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.CreatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.Property(x => x.UpdatedAt).IsRequired().HasDefaultValueSql("(UTC_TIMESTAMP(6) + INTERVAL 7 HOUR)");
             entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
-            entity.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<VideoRecipeDraftIngredient>(entity =>

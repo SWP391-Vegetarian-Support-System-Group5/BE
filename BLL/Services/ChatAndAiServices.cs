@@ -149,8 +149,8 @@ public class NutritionChatbotService(
         var dietTypeId = user?.Profile?.DietTypeId;
         var query = recipes.Query().AsNoTracking().Where(x => x.Post.Status == "PUBLISHED"
             && x.Ingredients.Any()
-            && !x.Ingredients.Any(i => i.DietaryGroup != "PLANT" && i.DietaryGroup != "DAIRY" && i.DietaryGroup != "EGG" && i.DietaryGroup != "HONEY")
-            && !x.Ingredients.Any(i => i.AllergenId.HasValue && allergens.Contains(i.AllergenId.Value))
+            && !x.Ingredients.Any(i => i.Ingredient.Category.Code != "PLANT" && i.Ingredient.Category.Code != "DAIRY" && i.Ingredient.Category.Code != "EGG" && i.Ingredient.Category.Code != "HONEY")
+            && !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergens.Contains(i.Ingredient.AllergenId.Value))
             && (!dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible)));
         var terms = message.Split([' ', ',', '.', '?', '!', ':', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(x => x.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();
@@ -160,7 +160,7 @@ public class NutritionChatbotService(
         Expression score = Expression.Constant(0);
         foreach (var term in terms)
         {
-            Expression<Func<Recipe, int>> match = recipe => recipe.RecipeName.Contains(term) || recipe.Ingredients.Any(i => i.IngredientName.Contains(term)) ? 1 : 0;
+            Expression<Func<Recipe, int>> match = recipe => recipe.RecipeName.Contains(term) || recipe.Ingredients.Any(i => i.Ingredient.Name.Contains(term)) ? 1 : 0;
             score = Expression.Add(score, new RecipeParameterVisitor(match.Parameters[0], parameter).Visit(match.Body)!);
         }
         var ranking = Expression.Lambda<Func<Recipe, int>>(score, parameter);

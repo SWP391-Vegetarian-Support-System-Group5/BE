@@ -32,7 +32,6 @@ public class ModerationService(IRepository<ModerationFlag> flags, IRepository<Po
 
 public class SeedService(
     IRepository<DietType> dietTypes,
-    IRepository<Category> categories,
     IRepository<Allergen> allergens,
     IRepository<User> users,
     IRepository<Post> posts,
@@ -40,12 +39,12 @@ public class SeedService(
     IRepository<RecipeIngredient> recipeIngredients,
     IRepository<RecipeStep> recipeSteps,
     IRepository<RecipeDietCompatibility> recipeDietCompatibilities,
-    RecipeCategoryService recipeCategories) : ISeedService
+    RecipeCategoryService recipeCategories,
+    IngredientCatalogService ingredientCatalog) : ISeedService
 {
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         await AddMissingAsync(dietTypes, ["VEGAN", "VEGETARIAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN"], name => new DietType { Name = name }, x => x.Name, cancellationToken);
-        await AddMissingAsync(categories, ["Food", "Recipe", "Blog", "Video"], name => new Category { Name = name, Type = name.ToUpperInvariant() }, x => x.Name, cancellationToken);
         await AddMissingAsync(allergens, ["Peanut", "Milk", "Egg", "Soy", "Gluten", "Tree Nut"], name => new Allergen { Name = name }, x => x.Name, cancellationToken);
         if (!await users.Query().AnyAsync(x => x.Email == "admin@vegetarian.local", cancellationToken))
         {
@@ -54,6 +53,7 @@ public class SeedService(
             await users.SaveChangesAsync(cancellationToken);
         }
         await SeedRecipeCatalogAsync(cancellationToken);
+        await ingredientCatalog.RefreshCompatibilityAsync(cancellationToken);
         await recipeCategories.SeedAsync(cancellationToken);
     }
     private static async Task AddMissingAsync<T>(IRepository<T> repository, IEnumerable<string> names, Func<string, T> create, Func<T, string> getName, CancellationToken ct) where T : class
@@ -69,7 +69,6 @@ public class SeedService(
             .Select(x => new { x.UserId, PostCount = x.Posts.Count }).ToListAsync(ct);
         if (authors.Count == 0) return;
         var authorPostCounts = authors.ToDictionary(x => x.UserId, x => x.PostCount);
-        var recipeCategoryId = await categories.Query().Where(x => x.Name == "Recipe").Select(x => x.CategoryId).FirstAsync(ct);
         var dietIds = await dietTypes.Query().ToDictionaryAsync(x => x.Name, x => x.DietTypeId, StringComparer.OrdinalIgnoreCase, ct);
         var allergenIds = await allergens.Query().ToDictionaryAsync(x => x.Name, x => x.AllergenId, StringComparer.OrdinalIgnoreCase, ct);
         var existingTitles = await posts.Query().Select(x => x.Title).ToListAsync(ct);
@@ -82,7 +81,6 @@ public class SeedService(
             var post = new Post
             {
                 UserId = authorId,
-                CategoryId = recipeCategoryId,
                 Title = seed.Title,
                 Content = seed.Description,
                 PostType = "RECIPE",
@@ -105,15 +103,14 @@ public class SeedService(
             await recipes.AddAsync(recipe, ct);
 
             var groups = seed.Ingredients.Select(x => x.Group).ToArray();
-            foreach (var ingredient in seed.Ingredients)
+            var resolved = await ingredientCatalog.ResolveAsync(seed.Ingredients.Select(x => new IngredientRequest(x.Name, x.Amount, x.Group, x.AllergenName is not null && allergenIds.TryGetValue(x.AllergenName, out var allergenId) ? allergenId : null)), ct);
+            foreach (var ingredient in resolved)
             {
                 await recipeIngredients.AddAsync(new RecipeIngredient
                 {
                     RecipeId = post.PostId,
-                    IngredientName = ingredient.Name,
+                    IngredientId = ingredient.Ingredient.IngredientId,
                     Amount = ingredient.Amount,
-                    DietaryGroup = ingredient.Group,
-                    AllergenId = ingredient.AllergenName is not null && allergenIds.TryGetValue(ingredient.AllergenName, out var allergenId) ? allergenId : null
                 }, ct);
             }
 
