@@ -11,8 +11,11 @@ namespace API.Controllers;
 [Route("api/admin")]
 public class AdministrationController(IUserAdministrationService userAdministrationService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService) : ControllerBase
 {
-    [HttpGet("users")] public Task<IReadOnlyCollection<AdminUserResponse>> GetUsers(CancellationToken ct) => userAdministrationService.GetUsersAsync(ct);
+    [HttpGet("dashboard/users")] public Task<AdminUserDashboardResponse> GetUserDashboard(CancellationToken ct) => userAdministrationService.GetDashboardAsync(ct);
+    [HttpGet("users")] public Task<IReadOnlyCollection<AdminUserResponse>> GetUsers([FromQuery] string? keyword, [FromQuery] string? role, [FromQuery] bool? isActive, CancellationToken ct) => userAdministrationService.GetUsersAsync(keyword, role, isActive, ct);
     [HttpGet("users/{id:int}")] public Task<AdminUserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
+    [HttpPost("users")] public async Task<ActionResult<AdminUserResponse>> CreateUser(AdminCreateUserRequest request, CancellationToken ct) { var user = await userAdministrationService.CreateAsync(request, ct); return Created($"/api/admin/users/{user.UserId}", user); }
+    [HttpPut("users/{id:int}")] public Task<AdminUserResponse> UpdateUser(int id, AdminUpdateUserRequest request, CancellationToken ct) => userAdministrationService.UpdateAsync(id, request, ct);
     [HttpPut("users/{id:int}/status")] public async Task<IActionResult> UpdateUserStatus(int id, UpdateUserStatusRequest request, CancellationToken ct) { await userAdministrationService.UpdateStatusAsync(id, request.IsActive, ct); return NoContent(); }
     [HttpDelete("users/{id:int}")] public async Task<IActionResult> DeleteUser(int id, CancellationToken ct) { await userAdministrationService.DeleteAsync(id, ct); return NoContent(); }
 

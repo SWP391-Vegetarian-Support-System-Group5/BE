@@ -28,8 +28,11 @@ public sealed class SendGridSettings
 
 public interface IUserAdministrationService
 {
-    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, CancellationToken cancellationToken = default);
+    Task<AdminUserDashboardResponse> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<AdminUserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> CreateAsync(AdminCreateUserRequest request, CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> UpdateAsync(int id, AdminUpdateUserRequest request, CancellationToken cancellationToken = default);
     Task UpdateStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 }
