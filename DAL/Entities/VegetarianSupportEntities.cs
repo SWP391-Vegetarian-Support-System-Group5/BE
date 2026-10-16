@@ -25,7 +25,6 @@ public class UserProfile
     public decimal? HeightCm { get; set; }
     public decimal? WeightKg { get; set; }
     public string? ActivityLevel { get; set; }
-    public string? HealthGoal { get; set; }
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
@@ -54,19 +53,10 @@ public class DietType
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
 }
 
-public class Category
-{
-    public int CategoryId { get; set; }
-    public string Name { get; set; } = null!;
-    public string Type { get; set; } = null!;
-    public ICollection<Post> Posts { get; set; } = new List<Post>();
-}
-
 public class Post
 {
     public int PostId { get; set; }
     public int UserId { get; set; }
-    public int? CategoryId { get; set; }
     public string Title { get; set; } = null!;
     public string Content { get; set; } = null!;
     public string PostType { get; set; } = null!;
@@ -76,9 +66,7 @@ public class Post
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public User User { get; set; } = null!;
-    public Category? Category { get; set; }
     public Recipe? Recipe { get; set; }
-    public RestaurantReview? RestaurantReview { get; set; }
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<PostRating> Ratings { get; set; } = new List<PostRating>();
     public ICollection<Bookmark> Bookmarks { get; set; } = new List<Bookmark>();
@@ -137,12 +125,10 @@ public class RecipeIngredient
 {
     public int RecipeIngredientId { get; set; }
     public int RecipeId { get; set; }
-    public string IngredientName { get; set; } = null!;
+    public int IngredientId { get; set; }
     public string? Amount { get; set; }
-    public string DietaryGroup { get; set; } = "UNVERIFIED";
-    public int? AllergenId { get; set; }
     public Recipe Recipe { get; set; } = null!;
-    public Allergen? Allergen { get; set; }
+    public Ingredient Ingredient { get; set; } = null!;
 }
 
 public class RecipeStep
@@ -168,7 +154,7 @@ public class Allergen
     public int AllergenId { get; set; }
     public string Name { get; set; } = null!;
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
-    public ICollection<RecipeIngredient> RecipeIngredients { get; set; } = new List<RecipeIngredient>();
+    public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
 }
 
 public class UserAllergen
@@ -189,16 +175,6 @@ public class Restaurant
     public int? DietTypeId { get; set; }
     public DietType? DietType { get; set; }
     public ICollection<RestaurantFood> Foods { get; set; } = new List<RestaurantFood>();
-    public ICollection<RestaurantReview> Reviews { get; set; } = new List<RestaurantReview>();
-}
-
-public class RestaurantReview
-{
-    public int PostId { get; set; }
-    public int RestaurantId { get; set; }
-    public int Rating { get; set; }
-    public Post Post { get; set; } = null!;
-    public Restaurant Restaurant { get; set; } = null!;
 }
 
 public class RestaurantFood
@@ -262,12 +238,10 @@ public class VideoRecipeDraft
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }
-    public int? CategoryId { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public User User { get; set; } = null!;
-    public Category? Category { get; set; }
     public ICollection<VideoRecipeDraftIngredient> Ingredients { get; set; } = new List<VideoRecipeDraftIngredient>();
     public ICollection<VideoRecipeDraftStep> Steps { get; set; } = new List<VideoRecipeDraftStep>();
 }

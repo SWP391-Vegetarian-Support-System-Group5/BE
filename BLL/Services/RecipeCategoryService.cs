@@ -89,15 +89,15 @@ public class RecipeCategoryService(VegetarianDbContext db)
         await db.SaveChangesAsync(ct);
         await BackfillDietaryAsync(ct);
     }
-    private async Task BackfillDietaryAsync(CancellationToken ct)
+    public async Task BackfillDietaryAsync(CancellationToken ct)
     {
         var dietary = await db.RecipeCategories.Where(c => c.Type == "DIETARY_TYPE").ToListAsync(ct);
-        var recipes = await db.Recipes.Include(r => r.Ingredients).ToListAsync(ct);
+        var recipes = await db.Recipes.Include(r => r.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).ToListAsync(ct);
         var existing = await db.RecipeCategoryMappings.Where(m => m.Category.Type == "DIETARY_TYPE").ToListAsync(ct);
         var expected = new HashSet<(int RecipeId, int CategoryId)>();
-        foreach (var r in recipes.Where(r => VegetarianDietRules.IsVerifiedVegetarianRecipe(r.Ingredients.Select(i => i.DietaryGroup))))
+        foreach (var r in recipes.Where(r => VegetarianDietRules.IsVerifiedVegetarianRecipe(r.Ingredients.Select(i => i.Ingredient.Category.Code))))
         {
-            var compatible = VegetarianDietRules.GetCompatibleDietTypes(r.Ingredients.Select(i => i.DietaryGroup));
+            var compatible = VegetarianDietRules.GetCompatibleDietTypes(r.Ingredients.Select(i => i.Ingredient.Category.Code));
             foreach (var c in dietary.Where(c => c.IsActive && DietSlugs.TryGetValue(c.Slug, out var diet) && compatible.Contains(diet))) expected.Add((r.PostId, c.Id));
         }
         var current = existing.Select(m => (m.RecipeId, m.CategoryId)).ToHashSet();

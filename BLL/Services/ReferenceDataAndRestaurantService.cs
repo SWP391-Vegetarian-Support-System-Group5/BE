@@ -8,29 +8,18 @@ namespace BLL.Services;
 
 public class ReferenceDataAndRestaurantService(
     IRepository<DietType> dietTypes,
-    IRepository<Category> categories,
     IRepository<Allergen> allergens,
     IRepository<Restaurant> restaurants,
     IRepository<RestaurantFood> restaurantFoods,
-    IRepository<Post> posts,
-    IRepository<RestaurantReview> restaurantReviews,
     IRepository<UserAllergen> userAllergens,
-    IRepository<RecipeIngredient> recipeIngredients) : IReferenceDataAndRestaurantService
+    IRepository<Ingredient> ingredients) : IReferenceDataAndRestaurantService
 {
     public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
         (await dietTypes.Query().OrderBy(x => x.Name).ToListAsync(cancellationToken))
             .Select(x => new DietTypeResponse(x.DietTypeId, x.Name, VegetarianDietRules.GetAllowedGroups(x.Name), VegetarianDietRules.ProhibitedNonVegetarianGroups.Concat(VegetarianDietRules.SupportedIngredientGroups.Except(VegetarianDietRules.GetAllowedGroups(x.Name))).ToArray()))
             .ToList();
-    public async Task<IReadOnlyCollection<CatalogItemResponse>> GetCategoriesAsync(CancellationToken cancellationToken = default) =>
-        await categories.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.CategoryId, x.Name, x.Type)).ToListAsync(cancellationToken);
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default) =>
         await allergens.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.AllergenId, x.Name, null)).ToListAsync(cancellationToken);
-    public async Task<CatalogItemResponse> CreateCategoryAsync(CategoryRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = new Category { Name = request.Name.Trim(), Type = FixedValues.CategoryType(request.Type) };
-        await categories.AddAsync(entity, cancellationToken); await categories.SaveChangesAsync(cancellationToken);
-        return new(entity.CategoryId, entity.Name, entity.Type);
-    }
     public async Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default)
     {
         var entity = new Allergen { Name = request.Name.Trim() };
@@ -39,10 +28,6 @@ public class ReferenceDataAndRestaurantService(
         return new(entity.AllergenId, entity.Name);
     }
 
-    public async Task UpdateCategoryAsync(int id, CategoryRequest request, CancellationToken cancellationToken = default)
-    {
-        var entity = await RequireAsync(categories, id, cancellationToken); entity.Name = request.Name.Trim(); entity.Type = FixedValues.CategoryType(request.Type); await categories.SaveChangesAsync(cancellationToken);
-    }
     public async Task UpdateAllergenAsync(int id, AllergenRequest request, CancellationToken cancellationToken = default)
     {
         var entity = await RequireAsync(allergens, id, cancellationToken); var name = request.Name.Trim();
@@ -50,16 +35,10 @@ public class ReferenceDataAndRestaurantService(
         entity.Name = name; await allergens.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task DeleteCategoryAsync(int id, CancellationToken cancellationToken = default)
-    {
-        await RequireAsync(categories, id, cancellationToken);
-        if (await posts.Query().AnyAsync(x => x.CategoryId == id, cancellationToken)) throw new ServiceException("Category is in use and cannot be deleted.", 409);
-        await DeleteAsync(categories, id, cancellationToken);
-    }
     public async Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default)
     {
         await RequireAsync(allergens, id, cancellationToken);
-        if (await userAllergens.Query().AnyAsync(x => x.AllergenId == id, cancellationToken) || await recipeIngredients.Query().AnyAsync(x => x.AllergenId == id, cancellationToken)) throw new ServiceException("Allergen is in use and cannot be deleted.", 409);
+        if (await userAllergens.Query().AnyAsync(x => x.AllergenId == id, cancellationToken) || await ingredients.Query().AnyAsync(x => x.AllergenId == id, cancellationToken)) throw new ServiceException("Allergen is in use and cannot be deleted.", 409);
         await DeleteAsync(allergens, id, cancellationToken);
     }
 
@@ -99,27 +78,9 @@ public class ReferenceDataAndRestaurantService(
         var restaurant = await restaurants.FindAsync(id) ?? throw new ServiceException("Restaurant was not found.", 404);
         foreach (var food in await restaurantFoods.Query().Where(x => x.RestaurantId == id).ToListAsync(cancellationToken))
             restaurantFoods.Remove(food);
-        foreach (var review in await restaurantReviews.Query().Where(x => x.RestaurantId == id).ToListAsync(cancellationToken))
-            restaurantReviews.Remove(review);
         await restaurantFoods.SaveChangesAsync(cancellationToken);
         restaurants.Remove(restaurant);
         await restaurants.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<RestaurantReviewResponse> CreateRestaurantReviewAsync(int restaurantId, int userId, RestaurantReviewRequest request, CancellationToken cancellationToken = default)
-    {
-        if (!await restaurants.Query().AnyAsync(x => x.RestaurantId == restaurantId, cancellationToken)) throw new ServiceException("Restaurant was not found.", 404);
-        var now = VietnamTime.Now;
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "BLOG", Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
-        await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
-        await restaurantReviews.AddAsync(new RestaurantReview { PostId = post.PostId, RestaurantId = restaurantId, Rating = request.Rating }, cancellationToken); await restaurantReviews.SaveChangesAsync(cancellationToken);
-        return new(post.PostId, restaurantId, userId, post.Title, post.Content, request.Rating);
-    }
-
-    public async Task<IReadOnlyCollection<RestaurantReviewResponse>> GetRestaurantReviewsAsync(int restaurantId, CancellationToken cancellationToken = default)
-    {
-        if (!await restaurants.Query().AnyAsync(x => x.RestaurantId == restaurantId, cancellationToken)) throw new ServiceException("Restaurant was not found.", 404);
-        return await restaurantReviews.Query().Include(x => x.Post).Where(x => x.RestaurantId == restaurantId && x.Post.Status == "PUBLISHED").Select(x => new RestaurantReviewResponse(x.PostId, x.RestaurantId, x.Post.UserId, x.Post.Title, x.Post.Content, x.Rating)).ToListAsync(cancellationToken);
     }
 
     private async Task ReplaceFoodsAsync(int restaurantId, List<string>? foods, CancellationToken cancellationToken)

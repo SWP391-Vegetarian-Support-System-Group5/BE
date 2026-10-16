@@ -124,7 +124,6 @@ public class AuthService(
         user.Profile?.HeightCm,
         user.Profile?.WeightKg,
         user.Profile?.ActivityLevel,
-        user.Profile?.HealthGoal,
         user.Profile?.DietTypeId,
         user.Profile?.Latitude,
         user.Profile?.Longitude,

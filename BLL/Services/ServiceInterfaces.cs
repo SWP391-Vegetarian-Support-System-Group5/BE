@@ -55,13 +55,9 @@ public interface ILocationService
 public interface IReferenceDataAndRestaurantService
 {
     Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<CatalogItemResponse>> GetCategoriesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default);
-    Task<CatalogItemResponse> CreateCategoryAsync(CategoryRequest request, CancellationToken cancellationToken = default);
     Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default);
-    Task UpdateCategoryAsync(int id, CategoryRequest request, CancellationToken cancellationToken = default);
     Task UpdateAllergenAsync(int id, AllergenRequest request, CancellationToken cancellationToken = default);
-    Task DeleteCategoryAsync(int id, CancellationToken cancellationToken = default);
     Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default);
     Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default);
@@ -69,8 +65,6 @@ public interface IReferenceDataAndRestaurantService
     Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default);
     Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default);
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
-    Task<RestaurantReviewResponse> CreateRestaurantReviewAsync(int restaurantId, int userId, RestaurantReviewRequest request, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RestaurantReviewResponse>> GetRestaurantReviewsAsync(int restaurantId, CancellationToken cancellationToken = default);
 }
 
 public interface IPostService

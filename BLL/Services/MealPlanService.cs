@@ -69,16 +69,16 @@ public class MealPlanService(
 
         var allValidCandidates = await recipes.Query()
             .Include(x => x.Post)
-            .Include(x => x.Ingredients)
+            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED")
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
             .ToListAsync(ct);
 
         var filteredCandidates = allValidCandidates
-            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
-            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
-            .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.Code)))
+            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.Code)).Contains(user.Profile?.DietType?.Name ?? ""))
+            .Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && userAllergenIds.Contains(i.Ingredient.AllergenId.Value)))
             .ToList();
 
         if (filteredCandidates.Count == 0) throw new ServiceException("The system does not have any recipes suitable for your diet/allergies.", 400);
@@ -86,7 +86,7 @@ public class MealPlanService(
         var preferences = IngredientPreferences.Parse(request.AvailableIngredients);
         var rnd = new Random();
         var aiCandidates = filteredCandidates
-            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.IngredientName), preferences) })
+            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .OrderByDescending(item => item.Matches)
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
             .ThenBy(_ => rnd.Next())
@@ -94,7 +94,7 @@ public class MealPlanService(
             .Select(item => new MealCandidate(
                 item.Recipe.PostId,
                 item.Recipe.RecipeName,
-                string.Join(", ", item.Recipe.Ingredients.Select(i => i.IngredientName))))
+                string.Join(", ", item.Recipe.Ingredients.Select(i => i.Ingredient.Name))))
             .ToList();
         if (aiCandidates.Count == 0) throw new ServiceException("No recipes are suitable for your diet/allergies.", 400);
 
@@ -205,17 +205,17 @@ public class MealPlanService(
 
         var replacementCandidates = await recipes.Query()
             .Include(x => x.Post)
-            .Include(x => x.Ingredients)
+            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED" && x.PostId != mealToReplace.RecipeId && !currentRecipeIdsInPlan.Contains(x.PostId))
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
-            .Where(x => !x.Ingredients.Any(i => i.AllergenId.HasValue && userAllergenIds.Contains(i.AllergenId.Value)))
+            .Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && userAllergenIds.Contains(i.Ingredient.AllergenId.Value)))
             .ToListAsync(ct);
         var random = new Random();
         var replacement = replacementCandidates
-            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.DietaryGroup)))
-            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
-            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.IngredientName), preferences) })
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.Code)))
+            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.Code)).Contains(user.Profile?.DietType?.Name ?? ""))
+            .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .OrderByDescending(item => item.Matches)
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
             .ThenBy(_ => random.Next())
