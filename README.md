@@ -99,6 +99,12 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 
 The API was verified against the existing SQL Server database with health checks, JWT login, Swagger, posts, comments, ratings, bookmarks, recipe search, restaurant search, moderation, guest chat, and a 28-meal plan generated for seven days.
 
+### Admin backend implementation status — 16 October 2026
+
+The admin user dashboard, user CRUD, catalogue and restaurant management, restaurant-food management, unified search, moderation endpoints, and local image upload have been implemented at the API, DTO, service, validation, and authorization layers. The solution builds with zero warnings and Swagger starts with the `http` launch profile while database startup tasks are disabled.
+
+No compatible team database or local MySQL instance was available during this implementation. Therefore, database migrations were not applied and database-backed endpoint results could not be integration-tested against real team data. The code is database-ready, but the team must still configure the shared MySQL connection string, apply migrations in a controlled environment, and run CRUD/integration tests before merging or deploying.
+
 ## Enable Gemini
 
 Add `Gemini__ApiKey` to `API/.env`, then run the API. The same key is used by the chatbot and video-recipe analysis.
