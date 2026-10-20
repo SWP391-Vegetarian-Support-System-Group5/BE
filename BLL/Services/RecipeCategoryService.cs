@@ -69,6 +69,20 @@ public class RecipeCategoryService(VegetarianDbContext db)
         await db.SaveChangesAsync(ct);
         foreach (var id in selected) db.RecipeCategoryMappings.Add(new RecipeCategoryMapping { RecipeId = recipeId, CategoryId = id });
     }
+
+    public async Task UpdateRecipeMappingsAsync(int recipeId, IReadOnlyCollection<int> ids, CancellationToken ct)
+    {
+        var recipe = await db.Recipes.Include(r => r.Post).Include(r => r.Ingredients).ThenInclude(i => i.Ingredient).ThenInclude(i => i.Category)
+            .SingleOrDefaultAsync(r => r.PostId == recipeId && r.Post.Status != "REMOVED", ct)
+            ?? throw new ServiceException("Recipe was not found.", 404);
+        var groups = recipe.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup).ToArray();
+        var selected = ids.Distinct().ToArray();
+        await ValidateSelectionAsync(selected, groups, ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await SetMappingsAsync(recipeId, selected, groups, ct);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
     public async Task SeedAsync(CancellationToken ct)
     {
         var catalog = new Dictionary<string, string[]>
@@ -95,9 +109,9 @@ public class RecipeCategoryService(VegetarianDbContext db)
         var recipes = await db.Recipes.Include(r => r.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).ToListAsync(ct);
         var existing = await db.RecipeCategoryMappings.Where(m => m.Category.Type == "DIETARY_TYPE").ToListAsync(ct);
         var expected = new HashSet<(int RecipeId, int CategoryId)>();
-        foreach (var r in recipes.Where(r => VegetarianDietRules.IsVerifiedVegetarianRecipe(r.Ingredients.Select(i => i.Ingredient.Category.Code))))
+        foreach (var r in recipes.Where(r => VegetarianDietRules.IsVerifiedVegetarianRecipe(r.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup))))
         {
-            var compatible = VegetarianDietRules.GetCompatibleDietTypes(r.Ingredients.Select(i => i.Ingredient.Category.Code));
+            var compatible = VegetarianDietRules.GetCompatibleDietTypes(r.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup));
             foreach (var c in dietary.Where(c => c.IsActive && DietSlugs.TryGetValue(c.Slug, out var diet) && compatible.Contains(diet))) expected.Add((r.PostId, c.Id));
         }
         var current = existing.Select(m => (m.RecipeId, m.CategoryId)).ToHashSet();

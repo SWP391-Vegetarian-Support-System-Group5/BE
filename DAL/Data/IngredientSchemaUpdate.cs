@@ -22,13 +22,17 @@ public static class IngredientSchemaUpdate
                 CREATE TABLE IF NOT EXISTS `IngredientCategories` (
                   `IngredientCategoryId` int NOT NULL AUTO_INCREMENT,
                   `Code` varchar(30) NOT NULL, `Name` varchar(100) NOT NULL,
+                  `DietaryGroup` varchar(30) NOT NULL DEFAULT 'UNVERIFIED',
                   PRIMARY KEY (`IngredientCategoryId`), UNIQUE KEY `UX_IngredientCategories_Code` (`Code`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """, ct);
+            if (!await HasColumnAsync(connection, "IngredientCategories", "DietaryGroup", ct))
+                await ExecuteAsync(connection, "ALTER TABLE `IngredientCategories` ADD COLUMN `DietaryGroup` varchar(30) NOT NULL DEFAULT 'UNVERIFIED'", ct);
             await ExecuteAsync(connection, """
                 INSERT IGNORE INTO `IngredientCategories` (`Code`,`Name`) VALUES
                 ('PLANT','Plant'), ('DAIRY','Dairy'), ('EGG','Egg'), ('HONEY','Honey'), ('UNVERIFIED','Unverified');
                 """, ct);
+            await ExecuteAsync(connection, "UPDATE `IngredientCategories` SET `DietaryGroup`=`Code` WHERE `Code` IN ('PLANT','DAIRY','EGG','HONEY') AND `DietaryGroup`='UNVERIFIED'", ct);
             await ExecuteAsync(connection, """
                 CREATE TABLE IF NOT EXISTS `Ingredients` (
                   `IngredientId` int NOT NULL AUTO_INCREMENT,

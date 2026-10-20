@@ -81,6 +81,7 @@ public interface IPostService
     Task<IReadOnlyCollection<CommentResponse>> GetAllCommentsAsync(CancellationToken cancellationToken = default);
     Task UpdateCommentAsync(int id, int actorId, string role, CommentRequest request, CancellationToken cancellationToken = default);
     Task DeleteCommentAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
+    Task SetCommentVisibilityAsync(int id, bool hidden, CancellationToken cancellationToken = default);
     Task SetRatingAsync(int postId, int userId, int rating, bool updateOnly, CancellationToken cancellationToken = default);
     Task DeleteRatingAsync(int postId, int userId, CancellationToken cancellationToken = default);
     Task<double> GetRatingAsync(int postId, CancellationToken cancellationToken = default);
