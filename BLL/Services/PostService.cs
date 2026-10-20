@@ -116,9 +116,22 @@ public class PostService(
 
     public async Task DeleteCommentAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
-        var comment = await comments.FindAsync(id) ?? throw new ServiceException("Comment was not found.", 404);
+        var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
+            .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
         EnsureOwner(comment.UserId, actorId, role); comment.Status = "REMOVED"; comment.UpdatedAt = VietnamTime.Now; await comments.SaveChangesAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
+    }
+
+    public async Task SetCommentVisibilityAsync(int id, bool hidden, CancellationToken cancellationToken = default)
+    {
+        var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
+            .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
+        if (comment.Status == "REMOVED") throw new ServiceException("Removed comments cannot change visibility.", 409);
+        comment.Status = hidden ? "HIDDEN" : "PUBLISHED";
+        comment.UpdatedAt = VietnamTime.Now;
+        await comments.SaveChangesAsync(cancellationToken);
+        await communityEvents.PublishAsync(new CommunityEvent(hidden ? "commentRemoved" : "commentUpdated", comment.PostId,
+            Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
     }
 
     public async Task SetRatingAsync(int postId, int userId, int rating, bool updateOnly, CancellationToken cancellationToken = default)

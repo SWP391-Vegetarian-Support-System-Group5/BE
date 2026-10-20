@@ -8,6 +8,18 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--admin-api"))
+{
+    await AdminApiTests.RunAsync();
+    return;
+}
+
+if (args.Contains("--apply-bmi-aiven"))
+{
+    await BmiTests.ApplyAivenAsync();
+    return;
+}
+
 if (args.Contains("--inspect-aiven") || args.Contains("--apply-aiven"))
 {
     var config = File.ReadAllLines("API/.aiven.env").Where(x => x.StartsWith("ConnectionStrings__VegetarianSupportDatabase="))
@@ -84,9 +96,9 @@ await Rejected(() => service.ValidateSelectionAsync([vegan.Id], [], default), "e
 await Rejected(() => service.ValidateSelectionAsync([999], ["PLANT"], default), "reject unknown category");
 await Rejected(async () => { await service.SaveAsync(null, Request(vegan), default); }, "reject duplicate slug/type");
 await Rejected(async () => { await service.SaveAsync(null, new("Pescatarian", "pescatarian", "DIETARY_TYPE", null, null), default); }, "reject pescatarian");
-var dairyCategory = new IngredientCategory { Code = "DAIRY", Name = "Dairy" };
+var dairyCategory = new IngredientCategory { Code = "DAIRY", Name = "Dairy", DietaryGroup = "DAIRY" };
 db.IngredientCategories.Add(dairyCategory);
-db.IngredientCategories.Add(new IngredientCategory { Code = "PLANT", Name = "Plant" });
+db.IngredientCategories.Add(new IngredientCategory { Code = "PLANT", Name = "Plant", DietaryGroup = "PLANT" });
 db.Recipes.Add(new Recipe { PostId = 500, RecipeName = "Soup", Ingredients = [new RecipeIngredient { Ingredient = new Ingredient { Name = "Milk", Category = dairyCategory } }] });
 await db.SaveChangesAsync();
 var soup = await db.RecipeCategories.SingleAsync(c => c.Slug == "soup");
@@ -110,7 +122,7 @@ db.Users.Add(new User { UserId = 1, Email = "test@example.invalid", PasswordHash
 await db.SaveChangesAsync();
 var events = new TestEvents();
 var ingredientCatalog = new IngredientCatalogService(db, service, events);
-var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), events, service, ingredientCatalog, db);
+var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), events, service, ingredientCatalog, db, new RecipeBmiService(db, events));
 var dinner = await db.RecipeCategories.SingleAsync(c => c.Slug == "dinner");
 var request = new CreateRecipeRequest("Test post", "Test content", null, 10, 10, 2, null,
     [new("Rice", "100g", "PLANT", null)], [new(1, "Cook rice")], "Rice bowl", [dinner.Id]);
@@ -134,6 +146,8 @@ Check(reclassified.Ingredients.Single().IngredientName == "Plant cheese" && recl
 var veganDietId = await db.DietTypes.Where(x => x.Name == "VEGAN").Select(x => x.DietTypeId).SingleAsync();
 Check(reclassified.CompatibleDietTypeIds.Contains(veganDietId), "shared category edit refreshes planner compatibility");
 Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared ingredient edit publishes recipe refresh event");
+
+await BmiTests.RunAsync();
 
 sealed class TestEvents : ICommunityEventPublisher
 {

@@ -61,7 +61,9 @@ public class MealPlanService(
     {
         var user = await users.Query().Include(x => x.Profile).ThenInclude(x => x!.DietType).Include(x => x.UserAllergens).SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new ServiceException("User not found.", 404);
 
-        var (bmi, bmiCategory) = CalculateDisplayBmi(user.Profile);
+        var (bmi, bmiCategory) = MealPlannerBmi.Calculate(user.Profile);
+        var bmiCode = MealPlannerBmi.RequiredCode(bmiCategory);
+        if (user.Profile?.DietType is null) throw new ServiceException("Choose your vegetarian type in your profile before creating a meal plan.", 400);
 
 
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
@@ -72,16 +74,17 @@ public class MealPlanService(
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED")
+            .Where(x => x.BMITypes.Any(m => m.BMIType.Code == bmiCode))
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
             .ToListAsync(ct);
 
         var filteredCandidates = allValidCandidates
-            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.Code)))
-            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.Code)).Contains(user.Profile?.DietType?.Name ?? ""))
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
+            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
             .Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && userAllergenIds.Contains(i.Ingredient.AllergenId.Value)))
             .ToList();
 
-        if (filteredCandidates.Count == 0) throw new ServiceException("The system does not have any recipes suitable for your diet/allergies.", 400);
+        if (filteredCandidates.Count == 0) throw new ServiceException("No recipes have been assigned to your BMI group that also match your vegetarian type and allergies. Please try again after an administrator reviews the recipes.", 400);
 
         var preferences = IngredientPreferences.Parse(request.AvailableIngredients);
         var rnd = new Random();
@@ -200,6 +203,9 @@ public class MealPlanService(
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
         var dietTypeId = user.Profile?.DietTypeId;
         var preferences = IngredientPreferences.Parse(plan.AvailableIngredients);
+        var (_, bmiCategory) = MealPlannerBmi.Calculate(user.Profile);
+        var bmiCode = MealPlannerBmi.RequiredCode(bmiCategory);
+        if (user.Profile?.DietType is null) throw new ServiceException("Choose your vegetarian type in your profile before creating a meal plan.", 400);
 
         var currentRecipeIdsInPlan = plan.Meals.Select(x => x.RecipeId).ToHashSet();
 
@@ -208,13 +214,14 @@ public class MealPlanService(
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED" && x.PostId != mealToReplace.RecipeId && !currentRecipeIdsInPlan.Contains(x.PostId))
+            .Where(x => x.BMITypes.Any(m => m.BMIType.Code == bmiCode))
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
             .Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && userAllergenIds.Contains(i.Ingredient.AllergenId.Value)))
             .ToListAsync(ct);
         var random = new Random();
         var replacement = replacementCandidates
-            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.Code)))
-            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.Code)).Contains(user.Profile?.DietType?.Name ?? ""))
+            .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
+            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .OrderByDescending(item => item.Matches)
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
@@ -229,19 +236,6 @@ public class MealPlanService(
 
         cache.Set(cacheKey, replaceCount + 1, TimeSpan.FromDays(7));
         return await GetByIdAsync(mealPlanId, userId, "USER", ct);
-    }
-    private (decimal? Bmi, string? Category) CalculateDisplayBmi(UserProfile? profile)
-    {
-        if (profile?.HeightCm == null || profile?.WeightKg == null) return (null, null);
-        var heightM = profile.HeightCm.Value / 100m;
-        var bmi = Math.Round(profile.WeightKg.Value / (heightM * heightM), 2);
-        string category = bmi switch
-        {
-            < 18.5m => "Underweight",
-            < 25m => "Normal",
-            _ => "Overweight"
-        };
-        return (bmi, category);
     }
 
     private async Task<List<AiMealResponse>> CallGeminiForMealPlanAsync(object candidates, string? availableIngredients, decimal? bmi, CancellationToken ct)
@@ -262,7 +256,7 @@ public class MealPlanService(
         var prompt = $@"Bạn là một chuyên gia dinh dưỡng thuần chay. Nhiệm vụ của bạn là lập thực đơn 7 ngày (Sáng, Trưa, Tối) dựa TRÊN ĐÚNG danh sách các món ăn ứng viên được cung cấp dưới đây.
 
             THÔNG TIN NGƯỜI DÙNG:
-        - Chỉ số BMI: {bmiText} (Hãy cân nhắc chọn món thanh đạm nếu thừa cân, và giàu dinh dưỡng nếu thiếu cân).
+        - Chỉ số BMI: {bmiText}. Danh sách ứng viên đã được lọc theo nhóm BMI do quản trị viên gán; không tự suy đoán calories hoặc chất dinh dưỡng.
         - Nguyên liệu ưu tiên có sẵn: {availableIngredients ?? "Không có"}.
 
             DANH SÁCH MÓN ĂN ỨNG VIÊN (Định dạng JSON):
@@ -337,7 +331,7 @@ public class MealPlanService(
         return plans.Select(plan =>
         {
             string? bmiCat = null;
-            if (plan.BMI.HasValue) bmiCat = plan.BMI.Value < 18.5m ? "Underweight" : plan.BMI.Value < 25m ? "Normal" : "Overweight";
+            if (plan.BMI.HasValue) bmiCat = MealPlannerBmi.Category(plan.BMI.Value);
 
             return new MealPlanResponse(
                 plan.MealPlanId,
@@ -354,7 +348,7 @@ public class MealPlanService(
         if (plan.UserId != userId && role != "ADMIN") throw new ServiceException("Forbidden", 403);
 
         string? bmiCat = null;
-        if (plan.BMI.HasValue) bmiCat = plan.BMI.Value < 18.5m ? "Underweight" : plan.BMI.Value < 25m ? "Normal" : "Overweight";
+        if (plan.BMI.HasValue) bmiCat = MealPlannerBmi.Category(plan.BMI.Value);
 
         return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName)).ToList());
     }

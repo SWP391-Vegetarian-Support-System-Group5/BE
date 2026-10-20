@@ -10,14 +10,58 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
 {
     public Task<List<IngredientCategoryResponse>> GetCategoriesAsync(CancellationToken ct) =>
         db.IngredientCategories.AsNoTracking().OrderBy(x => x.IngredientCategoryId)
-            .Select(x => new IngredientCategoryResponse(x.IngredientCategoryId, x.Code, x.Name)).ToListAsync(ct);
+            .Select(x => new IngredientCategoryResponse(x.IngredientCategoryId, x.Code, x.Name, x.DietaryGroup)).ToListAsync(ct);
 
     public Task<List<IngredientResponse>> GetIngredientsAsync(string? keyword, CancellationToken ct)
     {
         var query = db.Ingredients.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(keyword)) query = query.Where(x => x.Name.Contains(keyword.Trim()));
         return query.OrderBy(x => x.Name)
-            .Select(x => new IngredientResponse(x.IngredientId, x.Name, x.IngredientCategoryId, x.Category.Code, x.AllergenId)).ToListAsync(ct);
+            .Select(x => new IngredientResponse(x.IngredientId, x.Name, x.IngredientCategoryId, x.Category.DietaryGroup, x.AllergenId)).ToListAsync(ct);
+    }
+
+    public async Task<IngredientCategoryResponse> CreateCategoryAsync(IngredientCategoryRequest request, CancellationToken ct)
+    {
+        var code = request.Code.Trim().ToUpperInvariant();
+        var name = request.Name.Trim();
+        var group = NormalizeCategoryGroup(request.DietaryGroup);
+        if (string.IsNullOrWhiteSpace(name) || !System.Text.RegularExpressions.Regex.IsMatch(code, "^[A-Z][A-Z0-9_]*$"))
+            throw new ServiceException("Category name or code is invalid.");
+        if (await db.IngredientCategories.AnyAsync(x => x.Code == code, ct)) throw new ServiceException("Ingredient category code already exists.", 409);
+        var category = new IngredientCategory { Code = code, Name = name, DietaryGroup = group };
+        db.IngredientCategories.Add(category);
+        await db.SaveChangesAsync(ct);
+        return new(category.IngredientCategoryId, category.Code, category.Name, category.DietaryGroup);
+    }
+
+    public async Task<IngredientCategoryResponse> UpdateCategoryAsync(int id, IngredientCategoryRequest request, CancellationToken ct)
+    {
+        var category = await db.IngredientCategories.FindAsync([id], ct) ?? throw new ServiceException("Ingredient category was not found.", 404);
+        var code = request.Code.Trim().ToUpperInvariant();
+        var name = request.Name.Trim();
+        var group = NormalizeCategoryGroup(request.DietaryGroup);
+        if (string.IsNullOrWhiteSpace(name) || !System.Text.RegularExpressions.Regex.IsMatch(code, "^[A-Z][A-Z0-9_]*$"))
+            throw new ServiceException("Category name or code is invalid.");
+        if (await db.IngredientCategories.AnyAsync(x => x.IngredientCategoryId != id && x.Code == code, ct)) throw new ServiceException("Ingredient category code already exists.", 409);
+        if (IsBaseGroup(category.Code) && (code != category.Code || group != category.Code))
+            throw new ServiceException("A built-in dietary category cannot change its code or dietary group.");
+        var affectedRecipes = await db.RecipeIngredients.Where(x => x.Ingredient.IngredientCategoryId == id).Select(x => x.RecipeId).Distinct().ToListAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        category.Code = code; category.Name = name; category.DietaryGroup = group;
+        await db.SaveChangesAsync(ct);
+        await RefreshCompatibilityAsync(ct);
+        await recipeCategories.BackfillDietaryAsync(ct);
+        await transaction.CommitAsync(ct);
+        foreach (var recipeId in affectedRecipes) await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
+        return new(category.IngredientCategoryId, category.Code, category.Name, category.DietaryGroup);
+    }
+
+    private static bool IsBaseGroup(string code) => code is "PLANT" or "DAIRY" or "EGG" or "HONEY" or "UNVERIFIED";
+    private static string NormalizeCategoryGroup(string value)
+    {
+        var group = value.Trim().ToUpperInvariant();
+        if (group != "UNVERIFIED") VegetarianDietRules.NormalizeIngredientGroup(group);
+        return group;
     }
 
     public async Task<IngredientResponse> UpdateAsync(int id, UpdateIngredientRequest request, CancellationToken ct)
@@ -36,7 +80,7 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
         await recipeCategories.BackfillDietaryAsync(ct);
         await transaction.CommitAsync(ct);
         foreach (var recipeId in affectedRecipes) await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
-        return new(ingredient.IngredientId, ingredient.Name, category.IngredientCategoryId, category.Code, ingredient.AllergenId);
+        return new(ingredient.IngredientId, ingredient.Name, category.IngredientCategoryId, category.DietaryGroup, ingredient.AllergenId);
     }
 
     public async Task<IReadOnlyList<(Ingredient Ingredient, string? Amount)>> ResolveAsync(IEnumerable<IngredientRequest> requests, CancellationToken ct)
@@ -60,7 +104,7 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
                 db.Ingredients.Add(ingredient);
                 byName.Add(item.Name, ingredient);
             }
-            else if (ingredient.Category.Code != item.Code || (item.Request.AllergenId.HasValue && ingredient.AllergenId != item.Request.AllergenId))
+            else if (ingredient.Category.DietaryGroup != item.Code || (item.Request.AllergenId.HasValue && ingredient.AllergenId != item.Request.AllergenId))
             {
                 throw new ServiceException($"Ingredient '{ingredient.Name}' conflicts with its existing category or allergen. Use the classification in the ingredient catalog.", 409);
             }
@@ -74,7 +118,7 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
     {
         var recipes = await db.Recipes.Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).ToListAsync(ct);
         var diets = await db.DietTypes.ToDictionaryAsync(x => x.Name, x => x.DietTypeId, ct);
-        var expected = recipes.SelectMany(recipe => VegetarianDietRules.GetCompatibleDietTypes(recipe.Ingredients.Select(x => x.Ingredient.Category.Code))
+        var expected = recipes.SelectMany(recipe => VegetarianDietRules.GetCompatibleDietTypes(recipe.Ingredients.Select(x => x.Ingredient.Category.DietaryGroup))
             .Where(diets.ContainsKey).Select(name => (RecipeId: recipe.PostId, DietTypeId: diets[name]))).ToHashSet();
         var existing = await db.RecipeDietCompatibilities.ToListAsync(ct);
         db.RecipeDietCompatibilities.RemoveRange(existing.Where(x => !expected.Contains((x.RecipeId, x.DietTypeId))));

@@ -14,6 +14,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<PostRating> PostRatings => Set<PostRating>();
     public DbSet<Bookmark> Bookmarks => Set<Bookmark>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<BMIType> BMITypes => Set<BMIType>();
+    public DbSet<RecipeBMIType> RecipeBMITypes => Set<RecipeBMIType>();
     public DbSet<IngredientCategory> IngredientCategories => Set<IngredientCategory>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<RecipeCategory> RecipeCategories => Set<RecipeCategory>();
@@ -39,12 +41,30 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         ConfigureUsers(modelBuilder);
         ConfigureContent(modelBuilder);
         ConfigureRecipes(modelBuilder);
+        modelBuilder.Entity<BMIType>(entity =>
+        {
+            entity.ToTable("BMITypes", t => t.HasCheckConstraint("CK_BMITypes_Code", "`Code` IN ('UNDERWEIGHT','NORMAL','OBESE')"));
+            entity.HasKey(x => x.BMITypeId);
+            entity.Property(x => x.Code).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.HasIndex(x => x.Code).IsUnique();
+        });
+        modelBuilder.Entity<RecipeBMIType>(entity =>
+        {
+            entity.ToTable("RecipeBMITypes");
+            entity.HasKey(x => new { x.RecipeId, x.BMITypeId });
+            entity.HasIndex(x => new { x.BMITypeId, x.RecipeId });
+            entity.HasOne(x => x.Recipe).WithMany(x => x.BMITypes).HasForeignKey(x => x.RecipeId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.BMIType).WithMany(x => x.Recipes).HasForeignKey(x => x.BMITypeId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<IngredientCategory>(entity =>
         {
             entity.ToTable("IngredientCategories");
             entity.HasKey(x => x.IngredientCategoryId);
             entity.Property(x => x.Code).HasMaxLength(30).IsUnicode(false).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.DietaryGroup).HasMaxLength(30).IsUnicode(false).IsRequired();
             entity.HasIndex(x => x.Code).IsUnique();
         });
         modelBuilder.Entity<Ingredient>(entity =>

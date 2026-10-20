@@ -5,6 +5,7 @@ public class IngredientCategory
     public int IngredientCategoryId { get; set; }
     public string Code { get; set; } = null!;
     public string Name { get; set; } = null!;
+    public string DietaryGroup { get; set; } = "UNVERIFIED";
     public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
 }
 

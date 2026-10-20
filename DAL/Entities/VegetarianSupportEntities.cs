@@ -119,6 +119,7 @@ public class Recipe
     public ICollection<RecipeStep> Steps { get; set; } = new List<RecipeStep>();
     public ICollection<RecipeDietCompatibility> DietCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
     public ICollection<RecipeCategoryMapping> CategoryMappings { get; set; } = new List<RecipeCategoryMapping>();
+    public ICollection<RecipeBMIType> BMITypes { get; set; } = new List<RecipeBMIType>();
 }
 
 public class RecipeIngredient
