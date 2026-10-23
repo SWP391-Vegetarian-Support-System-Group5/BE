@@ -10,6 +10,7 @@ public static class BusinessLogicRegistration
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserAdministrationService, UserAdministrationService>();
+        services.AddScoped<IAdminAuditService, AdminAuditService>();
         services.AddScoped<IUserAllergenService, UserAllergenService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddSingleton<ILocationService, VietnamLocationService>();

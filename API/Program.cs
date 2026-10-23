@@ -170,6 +170,7 @@ app.UseStaticFiles();
 app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
+app.UseMiddleware<AdminAuditMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 

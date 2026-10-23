@@ -35,6 +35,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<VideoRecipeDraftIngredient> VideoRecipeDraftIngredients => Set<VideoRecipeDraftIngredient>();
     public DbSet<VideoRecipeDraftStep> VideoRecipeDraftSteps => Set<VideoRecipeDraftStep>();
     public DbSet<ModerationFlag> ModerationFlags => Set<ModerationFlag>();
+    public DbSet<AdminAuditLog> AdminAuditLogs => Set<AdminAuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -377,6 +378,17 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasOne(x => x.Comment).WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Reporter).WithMany().HasForeignKey(x => x.ReportedBy).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Reviewer).WithMany().HasForeignKey(x => x.ReviewedBy).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<AdminAuditLog>(entity =>
+        {
+            entity.ToTable("AdminAuditLogs");
+            entity.HasKey(x => x.AdminAuditLogId);
+            entity.Property(x => x.Method).HasMaxLength(10).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Path).HasMaxLength(500).IsRequired();
+            entity.HasIndex(x => x.CreatedAt);
+            entity.HasIndex(x => x.AdminUserId);
+            entity.HasOne(x => x.AdminUser).WithMany(x => x.AdminAuditLogs).HasForeignKey(x => x.AdminUserId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -24,8 +24,29 @@ public static class AdminCatalogSchemaUpdate
             await AddColumnAsync(connection, "RestaurantFoods", "Price", "DECIMAL(12,2) NULL", ct);
             await AddColumnAsync(connection, "RestaurantFoods", "DietTypeId", "INT NULL", ct);
             await AddColumnAsync(connection, "RestaurantFoods", "IsAvailable", "TINYINT(1) NOT NULL DEFAULT 1", ct);
+            await CreateAdminAuditLogTableAsync(connection, ct);
         }
         finally { await db.Database.CloseConnectionAsync(); }
+    }
+
+    private static async Task CreateAdminAuditLogTableAsync(DbConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS `AdminAuditLogs` (
+                `AdminAuditLogId` INT NOT NULL AUTO_INCREMENT,
+                `AdminUserId` INT NOT NULL,
+                `Method` VARCHAR(10) NOT NULL,
+                `Path` VARCHAR(500) NOT NULL,
+                `StatusCode` INT NOT NULL,
+                `CreatedAt` DATETIME(6) NOT NULL,
+                PRIMARY KEY (`AdminAuditLogId`),
+                INDEX `IX_AdminAuditLogs_AdminUserId` (`AdminUserId`),
+                INDEX `IX_AdminAuditLogs_CreatedAt` (`CreatedAt`),
+                CONSTRAINT `FK_AdminAuditLogs_Users_AdminUserId` FOREIGN KEY (`AdminUserId`) REFERENCES `Users` (`UserId`) ON DELETE RESTRICT
+            );
+            """;
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     private static async Task AddColumnAsync(DbConnection connection, string table, string column, string definition, CancellationToken ct)

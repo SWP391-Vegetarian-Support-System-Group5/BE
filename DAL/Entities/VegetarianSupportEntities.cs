@@ -14,6 +14,7 @@ public class User
     public ICollection<Post> Posts { get; set; } = new List<Post>();
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
+    public ICollection<AdminAuditLog> AdminAuditLogs { get; set; } = new List<AdminAuditLog>();
 }
 
 public class UserProfile
@@ -294,4 +295,15 @@ public class ModerationFlag
     public Comment? Comment { get; set; }
     public User? Reporter { get; set; }
     public User? Reviewer { get; set; }
+}
+
+public class AdminAuditLog
+{
+    public int AdminAuditLogId { get; set; }
+    public int AdminUserId { get; set; }
+    public string Method { get; set; } = null!;
+    public string Path { get; set; } = null!;
+    public int StatusCode { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public User AdminUser { get; set; } = null!;
 }

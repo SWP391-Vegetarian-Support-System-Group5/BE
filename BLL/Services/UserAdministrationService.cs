@@ -10,13 +10,15 @@ public class UserAdministrationService(IRepository<User> users, IRepository<User
 {
     private static readonly HashSet<string> AllowedRoles = new(StringComparer.OrdinalIgnoreCase) { "USER", "ADMIN" };
 
-    public async Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
     {
+        if (page < 1) throw new ServiceException("Page must be at least 1.");
+        if (pageSize is < 1 or > 100) throw new ServiceException("Page size must be between 1 and 100.");
         var query = users.Query().Include(x => x.Profile).AsQueryable();
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Email.ToLower().Contains(term) || (x.Profile != null && x.Profile.FullName.ToLower().Contains(term))); }
         if (!string.IsNullOrWhiteSpace(role)) { var value = NormalizeRole(role); query = query.Where(x => x.Role == value); }
         if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
-        return (await query.OrderByDescending(x => x.CreatedAt).ToListAsync(cancellationToken)).Select(ToResponse).ToList();
+        return (await query.OrderByDescending(x => x.CreatedAt).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken)).Select(ToResponse).ToList();
     }
 
     public async Task<AdminUserDashboardResponse> GetDashboardAsync(CancellationToken ct = default)

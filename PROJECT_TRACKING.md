@@ -15,8 +15,8 @@ This file is the repository-level source of truth while the organization has no 
 | Admin image upload | An Ninh | Implemented | `/api/admin/uploads/images` | Deployment storage persistence decision |
 | BMI recipe assignment | Team | Implemented | `/api/admin/recipes/bmi-types` | Existing test runner |
 | Ingredient catalogue | Team | Implemented | `/api/ingredients`, admin ingredient endpoints | Existing test runner |
-| Pagination for large admin lists | Unassigned | Planned | — | Define response envelope |
-| Audit log for admin actions | Unassigned | Planned | — | Requires schema and actor/event model |
+| Pagination for large admin lists | An Ninh | Implemented | User and audit-log lists accept `page` / `pageSize` (max 100) | Add response metadata envelope and extend to remaining lists |
+| Audit log for admin actions | An Ninh | Implemented | `/api/admin/audit-logs`; successful admin writes are recorded | Apply additive schema update and integration test |
 | Last-admin and self-lock protection | An Ninh | Implemented | Admin user update/status/delete guards | MySQL integration test |
 | Rate limiting | Unassigned | Planned | — | Define limits for auth, OTP, search and map |
 

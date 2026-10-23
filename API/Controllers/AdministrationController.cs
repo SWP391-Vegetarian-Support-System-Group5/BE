@@ -11,10 +11,11 @@ namespace API.Controllers;
 [ApiController]
 [Authorize(Roles = "ADMIN")]
 [Route("api/admin")]
-public class AdministrationController(IUserAdministrationService userAdministrationService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService, IngredientCatalogService ingredientCatalog, IOpenStreetMapService mapService) : ControllerBase
+public class AdministrationController(IUserAdministrationService userAdministrationService, IAdminAuditService auditService, IReferenceDataAndRestaurantService referenceDataService, IPostService postService, IModerationService moderationService, IngredientCatalogService ingredientCatalog, IOpenStreetMapService mapService) : ControllerBase
 {
     [HttpGet("dashboard/users")] public Task<AdminUserDashboardResponse> GetUserDashboard(CancellationToken ct) => userAdministrationService.GetDashboardAsync(ct);
-    [HttpGet("users")] public Task<IReadOnlyCollection<AdminUserResponse>> GetUsers([FromQuery] string? keyword, [FromQuery] string? role, [FromQuery] bool? isActive, CancellationToken ct) => userAdministrationService.GetUsersAsync(keyword, role, isActive, ct);
+    [HttpGet("users")] public Task<IReadOnlyCollection<AdminUserResponse>> GetUsers([FromQuery] string? keyword, [FromQuery] string? role, [FromQuery] bool? isActive, [FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default) => userAdministrationService.GetUsersAsync(keyword, role, isActive, page, pageSize, ct);
+    [HttpGet("audit-logs")] public Task<IReadOnlyCollection<AdminAuditLogResponse>> GetAuditLogs([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken ct = default) => auditService.GetAsync(page, pageSize, ct);
     [HttpGet("users/{id:int}")] public Task<AdminUserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
     [HttpPost("users")] public async Task<ActionResult<AdminUserResponse>> CreateUser(AdminCreateUserRequest request, CancellationToken ct) { var created = await userAdministrationService.CreateAsync(request, ct); return Created($"/api/admin/users/{created.UserId}", created); }
     [HttpPut("users/{id:int}")] public Task<AdminUserResponse> UpdateUser(int id, AdminUpdateUserRequest request, CancellationToken ct) => userAdministrationService.UpdateAsync(id, User.GetRequiredUserId(), request, ct);

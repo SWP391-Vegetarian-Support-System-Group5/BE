@@ -28,13 +28,19 @@ public sealed class SendGridSettings
 
 public interface IUserAdministrationService
 {
-    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
     Task<AdminUserDashboardResponse> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<AdminUserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
     Task<AdminUserResponse> CreateAsync(AdminCreateUserRequest request, CancellationToken cancellationToken = default);
     Task<AdminUserResponse> UpdateAsync(int id, int actorId, AdminUpdateUserRequest request, CancellationToken cancellationToken = default);
     Task UpdateStatusAsync(int id, int actorId, bool isActive, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, CancellationToken cancellationToken = default);
+}
+
+public interface IAdminAuditService
+{
+    Task RecordAsync(int adminUserId, string method, string path, int statusCode, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<AdminAuditLogResponse>> GetAsync(int page = 1, int pageSize = 50, CancellationToken cancellationToken = default);
 }
 
 public interface IUserAllergenService
