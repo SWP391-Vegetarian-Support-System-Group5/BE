@@ -3,11 +3,13 @@ using BLL.DTOs;
 using BLL.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+[EnableRateLimiting("auth")]
 public class AuthenticationController(IAuthService authService, IJwtTokenService tokenService) : ControllerBase
 {
     [HttpPost("register")]

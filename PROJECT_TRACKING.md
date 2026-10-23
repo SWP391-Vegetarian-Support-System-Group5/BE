@@ -18,7 +18,7 @@ This file is the repository-level source of truth while the organization has no 
 | Pagination for large admin lists | An Ninh | Implemented | User and audit-log lists accept `page` / `pageSize` (max 100) | Add response metadata envelope and extend to remaining lists |
 | Audit log for admin actions | An Ninh | Implemented | `/api/admin/audit-logs`; successful admin writes are recorded | Apply additive schema update and integration test |
 | Last-admin and self-lock protection | An Ninh | Implemented | Admin user update/status/delete guards | MySQL integration test |
-| Rate limiting | Unassigned | Planned | — | Define limits for auth, OTP, search and map |
+| Rate limiting | An Ninh | Implemented | 10 auth requests/minute; 60 search/location requests/minute per client | Tune limits from production telemetry |
 
 ## Status definitions
 

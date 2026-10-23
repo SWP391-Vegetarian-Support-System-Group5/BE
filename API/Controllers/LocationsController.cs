@@ -3,12 +3,14 @@ using BLL.Services;
 using API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/locations")]
+[EnableRateLimiting("external-read")]
 public sealed class LocationsController(ILocationService locationService, IOpenStreetMapService mapService) : ControllerBase
 {
     [HttpGet("provinces")]

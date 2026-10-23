@@ -4,12 +4,14 @@ using BLL.DTOs;
 using BLL.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/search")]
+[EnableRateLimiting("external-read")]
 public class SearchController(IReferenceDataAndRestaurantService restaurants, IRecipeService recipes, IPostService posts) : ControllerBase
 {
     [HttpGet]
