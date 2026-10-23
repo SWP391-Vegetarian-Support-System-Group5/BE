@@ -265,6 +265,10 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.RestaurantId);
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Address).HasMaxLength(300).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(1000);
+            entity.Property(x => x.PhoneNumber).HasMaxLength(30).IsUnicode(false);
+            entity.Property(x => x.OpeningHours).HasMaxLength(200);
+            entity.Property(x => x.ImageUrl).HasMaxLength(1000).IsUnicode(false);
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
             entity.HasOne(x => x.DietType).WithMany(x => x.Restaurants).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
@@ -275,7 +279,11 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.ToTable("RestaurantFoods");
             entity.HasKey(x => new { x.RestaurantId, x.FoodName });
             entity.Property(x => x.FoodName).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(1000);
+            entity.Property(x => x.ImageUrl).HasMaxLength(1000).IsUnicode(false);
+            entity.Property(x => x.Price).HasPrecision(12, 2);
             entity.HasOne(x => x.Restaurant).WithMany(x => x.Foods).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.DietType).WithMany().HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
         });
 
     }

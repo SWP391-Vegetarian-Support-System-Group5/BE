@@ -12,7 +12,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using CloudinaryDotNet;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,8 +53,6 @@ builder.Services.AddSingleton<ICommunityEventPublisher>(provider => provider.Get
 builder.Services.AddMemoryCache();
 var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
 builder.Services.AddSingleton(cloudinarySettings);
-var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
-builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
@@ -152,6 +149,7 @@ builder.Services.AddSwaggerGen(options =>
             "Chat" or "AiFeatures" or "VideoRecipeDrafts" => "AI Assistant",
             "Reports" => "Moderation",
             "Administration" => "Administration",
+            "Search" => "Search",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
             "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
@@ -183,6 +181,7 @@ if (runDatabaseStartupTasks)
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await AdminCatalogSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }

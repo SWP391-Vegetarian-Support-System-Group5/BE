@@ -16,8 +16,16 @@ public class ModerationService(IRepository<ModerationFlag> flags, IRepository<Po
     {
         var flag = await flags.FindAsync(id) ?? throw new ServiceException("Moderation flag was not found.", 404);
         flag.ReviewedBy = adminId; flag.Status = removeContent ? "REMOVED" : "APPROVED";
-        if (removeContent && flag.PostId.HasValue) { var post = await posts.FindAsync(flag.PostId.Value); if (post is not null) post.Status = "REMOVED"; }
-        if (removeContent && flag.CommentId.HasValue) { var comment = await comments.FindAsync(flag.CommentId.Value); if (comment is not null) comment.Status = "REMOVED"; }
+        if (flag.PostId.HasValue)
+        {
+            var post = await posts.FindAsync(flag.PostId.Value);
+            if (post is not null) { post.Status = removeContent ? "REMOVED" : "PUBLISHED"; post.UpdatedAt = VietnamTime.Now; }
+        }
+        if (flag.CommentId.HasValue)
+        {
+            var comment = await comments.FindAsync(flag.CommentId.Value);
+            if (comment is not null) { comment.Status = removeContent ? "REMOVED" : "PUBLISHED"; comment.UpdatedAt = VietnamTime.Now; }
+        }
         await flags.SaveChangesAsync(cancellationToken);
     }
     private async Task<ModerationFlagResponse> ReportAsync(int? postId, int? commentId, int userId, ReportRequest request, CancellationToken ct)

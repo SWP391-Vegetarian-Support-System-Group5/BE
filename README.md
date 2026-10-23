@@ -23,6 +23,8 @@ API (controllers, JWT, Swagger, middleware)
 
 ## Project structure
 
+Implementation ownership, gaps, and verification status are maintained in [PROJECT_TRACKING.md](PROJECT_TRACKING.md).
+
 ```text
 API/    Presentation layer, controllers, middleware, JWT configuration
 BLL/    DTOs, services, business rules, nutrition chatbot and RAG services

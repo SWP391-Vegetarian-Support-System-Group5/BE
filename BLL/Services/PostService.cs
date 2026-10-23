@@ -19,12 +19,14 @@ public class PostService(
     {
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
+        // Moderate before publication so suspicious content never appears in the public feed first.
+        var flagReason = await moderationAiService.FlagReasonAsync($"{request.Title}\n{request.Content}", cancellationToken);
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = flagReason is null ? "PUBLISHED" : "PENDING_REVIEW", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
-        await CreateAiPostFlagAsync(post.PostId, post.Content, cancellationToken);
+        if (flagReason is not null) { await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = flagReason, Status = "PENDING" }, cancellationToken); await moderationFlags.SaveChangesAsync(cancellationToken); }
         var response = await GetByIdAsync(post.PostId, userId, "USER", cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: response), cancellationToken);
+        if (post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: response), cancellationToken);
         return response;
     }
 
@@ -62,9 +64,15 @@ public class PostService(
         EnsureOwner(post.UserId, actorId, role);
         var videoUrl = request.VideoUrl?.Trim();
         post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); post.UpdatedAt = VietnamTime.Now;
-        if (!string.IsNullOrWhiteSpace(request.Status) && role == "ADMIN") post.Status = FixedValues.PostStatus(request.Status);
+        if (role == "ADMIN" && !string.IsNullOrWhiteSpace(request.Status)) post.Status = FixedValues.PostStatus(request.Status);
+        else if (role != "ADMIN")
+        {
+            var reason = await moderationAiService.FlagReasonAsync($"{post.Title}\n{post.Content}", cancellationToken);
+            post.Status = reason is null ? "PUBLISHED" : "PENDING_REVIEW";
+            if (reason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = reason, Status = "PENDING" }, cancellationToken);
+        }
         await posts.SaveChangesAsync(cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("postUpdated", id, Post: await GetByIdAsync(id, actorId, role, cancellationToken)), cancellationToken);
+        if (post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent("postUpdated", id, Post: await GetByIdAsync(id, actorId, role, cancellationToken)), cancellationToken);
     }
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
@@ -72,6 +80,15 @@ public class PostService(
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role); post.Status = "REMOVED"; post.UpdatedAt = VietnamTime.Now; await posts.SaveChangesAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
+    }
+
+    public async Task SetStatusAsync(int id, string status, CancellationToken cancellationToken = default)
+    {
+        var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
+        post.Status = FixedValues.PostStatus(status);
+        post.UpdatedAt = VietnamTime.Now;
+        await posts.SaveChangesAsync(cancellationToken);
+        await communityEvents.PublishAsync(new CommunityEvent(post.Status == "PUBLISHED" ? "postUpdated" : "postRemoved", id), cancellationToken);
     }
 
     public async Task<CommentResponse> AddCommentAsync(int postId, int userId, int? parentCommentId, CommentRequest request, CancellationToken cancellationToken = default)

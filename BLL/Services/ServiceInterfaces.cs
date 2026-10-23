@@ -28,10 +28,13 @@ public sealed class SendGridSettings
 
 public interface IUserAdministrationService
 {
-    Task<IReadOnlyCollection<UserResponse>> GetUsersAsync(CancellationToken cancellationToken = default);
-    Task<UserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
-    Task UpdateStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
-    Task DeleteAsync(int id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<AdminUserResponse>> GetUsersAsync(string? keyword = null, string? role = null, bool? isActive = null, CancellationToken cancellationToken = default);
+    Task<AdminUserDashboardResponse> GetDashboardAsync(CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> CreateAsync(AdminCreateUserRequest request, CancellationToken cancellationToken = default);
+    Task<AdminUserResponse> UpdateAsync(int id, int actorId, AdminUpdateUserRequest request, CancellationToken cancellationToken = default);
+    Task UpdateStatusAsync(int id, int actorId, bool isActive, CancellationToken cancellationToken = default);
+    Task DeleteAsync(int id, int actorId, CancellationToken cancellationToken = default);
 }
 
 public interface IUserAllergenService
@@ -54,17 +57,24 @@ public interface ILocationService
 
 public interface IReferenceDataAndRestaurantService
 {
-    Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(bool includeInactive = false, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(bool includeInactive = false, CancellationToken cancellationToken = default);
     Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default);
     Task UpdateAllergenAsync(int id, AllergenRequest request, CancellationToken cancellationToken = default);
     Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default);
-    Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default);
+    Task UpdateAllergenStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
+    Task UpdateDietTypeStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, bool includeInactive = false, CancellationToken cancellationToken = default);
+    Task<RestaurantResponse?> GetRestaurantAsync(int id, bool includeInactive = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken cancellationToken = default);
     Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default);
     Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default);
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
+    Task UpdateRestaurantStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RestaurantFoodResponse>> GetRestaurantFoodsAsync(int restaurantId, bool includeUnavailable = false, CancellationToken cancellationToken = default);
+    Task<RestaurantFoodResponse> CreateRestaurantFoodAsync(int restaurantId, RestaurantFoodRequest request, CancellationToken cancellationToken = default);
+    Task<RestaurantFoodResponse> UpdateRestaurantFoodAsync(int restaurantId, string foodName, RestaurantFoodRequest request, CancellationToken cancellationToken = default);
+    Task DeleteRestaurantFoodAsync(int restaurantId, string foodName, CancellationToken cancellationToken = default);
 }
 
 public interface IPostService
@@ -75,6 +85,7 @@ public interface IPostService
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
+    Task SetStatusAsync(int id, string status, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddCommentAsync(int postId, int userId, int? parentCommentId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddReplyAsync(int parentCommentId, int userId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default);

@@ -9,7 +9,7 @@ public static class FixedValues
 
     public static string PostType(string? value) => Require(value, ["BLOG", "QUESTION", "RECIPE", "VIDEO"], "Post type must be BLOG, QUESTION, RECIPE, or VIDEO.");
 
-    public static string PostStatus(string? value) => Require(value, ["DRAFT", "PUBLISHED", "REMOVED"], "Post status must be DRAFT, PUBLISHED, or REMOVED.");
+    public static string PostStatus(string? value) => Require(value, ["DRAFT", "PENDING_REVIEW", "PUBLISHED", "REMOVED"], "Post status must be DRAFT, PENDING_REVIEW, PUBLISHED, or REMOVED.");
 
 
     private static string Require(string? value, IReadOnlyCollection<string> allowedValues, string message)

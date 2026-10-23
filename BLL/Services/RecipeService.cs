@@ -18,7 +18,9 @@ public class RecipeService(
     RecipeCategoryService recipeCategories,
     IngredientCatalogService ingredientCatalog,
     DAL.Data.VegetarianDbContext db,
-    RecipeBmiService recipeBmi) : IRecipeService
+    RecipeBmiService recipeBmi,
+    IRepository<ModerationFlag> moderationFlags,
+    IModerationAiService moderationAiService) : IRecipeService
 {
     public async Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default)
     {
@@ -28,17 +30,20 @@ public class RecipeService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
+        var moderationText = $"{request.Title}\n{request.RecipeName}\n{request.Content}\n{string.Join(" ", (request.Ingredients ?? []).Select(x => x.IngredientName))}";
+        var flagReason = await moderationAiService.FlagReasonAsync(moderationText, cancellationToken);
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = flagReason is null ? "PUBLISHED" : "PENDING_REVIEW", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl };
         await recipes.AddAsync(recipe, cancellationToken);
         await ReplaceDetailsAsync(recipe.PostId, request, cancellationToken);
         await recipeBmi.SetMappingsAsync(recipe.PostId, request.BmiTypeIds, cancellationToken);
+        if (flagReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = flagReason, Status = "PENDING" }, cancellationToken);
         await recipes.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        var response = await GetAsync(post.PostId, cancellationToken);
+        var response = ToResponse(await BaseQuery().SingleAsync(x => x.PostId == post.PostId, cancellationToken));
         var createdPost = await PostBaseQuery().SingleAsync(x => x.PostId == post.PostId, cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: ToPostResponse(createdPost, userId)), cancellationToken);
+        if (post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: ToPostResponse(createdPost, userId)), cancellationToken);
         return response;
     }
 
@@ -59,6 +64,13 @@ public class RecipeService(
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
+        if (role != "ADMIN")
+        {
+            var moderationText = $"{request.Title}\n{request.RecipeName}\n{request.Content}\n{string.Join(" ", (request.Ingredients ?? []).Select(x => x.IngredientName))}";
+            var reason = await moderationAiService.FlagReasonAsync(moderationText, cancellationToken);
+            recipe.Post.Status = reason is null ? "PUBLISHED" : "PENDING_REVIEW";
+            if (reason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "AI", Reason = reason, Status = "PENDING" }, cancellationToken);
+        }
         recipe.RecipeName = request.RecipeName.Trim();
         recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl;
         foreach (var item in recipe.Ingredients) ingredients.Remove(item);
@@ -69,7 +81,7 @@ public class RecipeService(
         await recipeBmi.SetMappingsAsync(id, request.BmiTypeIds, cancellationToken);
         await recipes.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("postUpdated", id), cancellationToken);
+        if (recipe.Post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent("postUpdated", id), cancellationToken);
     }
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)

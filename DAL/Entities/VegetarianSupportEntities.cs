@@ -48,6 +48,7 @@ public class DietType
 {
     public int DietTypeId { get; set; }
     public string Name { get; set; } = null!;
+    public bool IsActive { get; set; } = true;
     public ICollection<UserProfile> UserProfiles { get; set; } = new List<UserProfile>();
     public ICollection<Restaurant> Restaurants { get; set; } = new List<Restaurant>();
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
@@ -154,6 +155,7 @@ public class Allergen
 {
     public int AllergenId { get; set; }
     public string Name { get; set; } = null!;
+    public bool IsActive { get; set; } = true;
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
     public ICollection<Ingredient> Ingredients { get; set; } = new List<Ingredient>();
 }
@@ -174,6 +176,11 @@ public class Restaurant
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
     public int? DietTypeId { get; set; }
+    public string? Description { get; set; }
+    public string? PhoneNumber { get; set; }
+    public string? OpeningHours { get; set; }
+    public string? ImageUrl { get; set; }
+    public bool IsActive { get; set; } = true;
     public DietType? DietType { get; set; }
     public ICollection<RestaurantFood> Foods { get; set; } = new List<RestaurantFood>();
 }
@@ -182,7 +189,13 @@ public class RestaurantFood
 {
     public int RestaurantId { get; set; }
     public string FoodName { get; set; } = null!;
+    public string? Description { get; set; }
+    public string? ImageUrl { get; set; }
+    public decimal? Price { get; set; }
+    public int? DietTypeId { get; set; }
+    public bool IsAvailable { get; set; } = true;
     public Restaurant Restaurant { get; set; } = null!;
+    public DietType? DietType { get; set; }
 }
 
 public class MealPlan

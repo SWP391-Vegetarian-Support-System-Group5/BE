@@ -1,6 +1,7 @@
 .vs/
 **/bin/
 **/obj/
+API/wwwroot/uploads/images/
 *.user
 *.suo
 *.env

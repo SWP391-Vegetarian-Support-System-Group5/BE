@@ -14,6 +14,10 @@ public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email,
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
 public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive);
+public record AdminUserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive, bool IsEmailVerified, DateTime CreatedAt, DateTime UpdatedAt);
+public record AdminUserDashboardResponse(int TotalUsers, int ActiveUsers, int InactiveUsers, int VerifiedUsers, int AdminUsers, int RegularUsers);
+public record AdminCreateUserRequest([Required, EmailAddress] string Email, [Required, MinLength(6)] string Password, [Required, MaxLength(150)] string FullName, [Required] string Role, string? Sex = null, [DataType(DataType.Date)] DateTime? BirthDate = null, [Range(1, 300)] decimal? HeightCm = null, [Range(1, 1000)] decimal? WeightKg = null, string? ActivityLevel = null, int? DietTypeId = null, [Range(-90, 90)] decimal? Latitude = null, [Range(-180, 180)] decimal? Longitude = null, bool IsActive = true, bool IsEmailVerified = true);
+public record AdminUpdateUserRequest([Required, EmailAddress] string Email, [Required, MaxLength(150)] string FullName, [Required] string Role, string? Sex, [DataType(DataType.Date)] DateTime? BirthDate, [Range(1, 300)] decimal? HeightCm, [Range(1, 1000)] decimal? WeightKg, string? ActivityLevel, int? DietTypeId, [Range(-90, 90)] decimal? Latitude, [Range(-180, 180)] decimal? Longitude, bool IsActive, bool IsEmailVerified);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
     string? Sex,
@@ -31,15 +35,21 @@ public record UpdateUserLocationRequest(
     [Range(-180, 180)] decimal Longitude);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
+public record UpdatePostStatusRequest([Required] string Status);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
-public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups);
-public record AllergenRequest([Required, MaxLength(150)] string Name);
-public record CatalogItemResponse(int Id, string Name, string? Type = null);
+public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups, bool IsActive = true);
+public record AllergenRequest([Required, MaxLength(150)] string Name, bool IsActive = true);
+public record CatalogItemResponse(int Id, string Name, string? Type = null, bool IsActive = true);
+public record UpdateCatalogStatusRequest(bool IsActive);
 public record ProvinceResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
 public record AreaResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
-public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, List<string>? Foods);
-public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, IReadOnlyCollection<string> Foods);
+public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, List<string>? Foods, [MaxLength(1000)] string? Description = null, [MaxLength(30)] string? PhoneNumber = null, [MaxLength(200)] string? OpeningHours = null, [MaxLength(1000)] string? ImageUrl = null, bool IsActive = true);
+public record RestaurantFoodRequest([Required, MaxLength(200)] string FoodName, [MaxLength(1000)] string? Description = null, [MaxLength(1000)] string? ImageUrl = null, [Range(0, 9999999999)] decimal? Price = null, int? DietTypeId = null, bool IsAvailable = true);
+public record RestaurantFoodResponse(string FoodName, string? Description, string? ImageUrl, decimal? Price, int? DietTypeId, bool IsAvailable);
+public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, int? DietTypeId, IReadOnlyCollection<string> Foods, string? Description = null, string? PhoneNumber = null, string? OpeningHours = null, string? ImageUrl = null, bool IsActive = true, IReadOnlyCollection<RestaurantFoodResponse>? FoodDetails = null);
+public record UnifiedSearchResponse(string Keyword, IReadOnlyCollection<RestaurantResponse> Restaurants, IReadOnlyCollection<RecipeResponse> Recipes, IReadOnlyCollection<PostResponse> Posts);
+public record ImageUploadResponse(string Url, string FileName, long Size, string ContentType);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl, string? Status);
 public record PostResponse(int PostId, int UserId, string AuthorName, string Title, string Content, string PostType, string? VideoUrl, string? ThumbnailUrl, string Status, double AverageRating, int RatingCount, int CommentCount, int? CurrentUserRating, DateTime CreatedAt, DateTime UpdatedAt);
