@@ -31,6 +31,10 @@ This file is the repository-level source of truth while the organization has no 
 
 Local development currently does not have the team MySQL database. The additive `AdminCatalogSchemaUpdate` runs only when database startup tasks are enabled. Do not mark database-backed work as **Verified** until the shared connection string is configured and the API tests pass without destructive schema changes.
 
+Some legacy EF migrations contain SQL Server-specific statements while the current API is configured for MySQL/Pomelo. The team must reconcile the migration provider before relying on `Database.MigrateAsync()` for a clean database. Until then, preserve the existing additive schema updates and verify them only against a disposable copy of the shared MySQL schema.
+
+Runtime uploads are intentionally ignored by Git. Persist production images and videos in Cloudinary/object storage or a mounted deployment volume instead of committing generated media to the repository.
+
 ## GitHub tracking links
 
 - Issues: https://github.com/SWP391-Vegetarian-Support-System-Group5/BE/issues
