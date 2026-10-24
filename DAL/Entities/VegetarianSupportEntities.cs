@@ -49,7 +49,7 @@ public class DietType
     public int DietTypeId { get; set; }
     public string Name { get; set; } = null!;
     public ICollection<UserProfile> UserProfiles { get; set; } = new List<UserProfile>();
-    public ICollection<Restaurant> Restaurants { get; set; } = new List<Restaurant>();
+    public ICollection<RestaurantDietType> RestaurantMappings { get; set; } = new List<RestaurantDietType>();
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
 }
 
@@ -173,9 +173,25 @@ public class Restaurant
     public string Address { get; set; } = null!;
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
-    public int? DietTypeId { get; set; }
-    public DietType? DietType { get; set; }
+    public ICollection<RestaurantDietType> DietTypes { get; set; } = new List<RestaurantDietType>();
     public ICollection<RestaurantFood> Foods { get; set; } = new List<RestaurantFood>();
+    public ICollection<RestaurantIngredient> Ingredients { get; set; } = new List<RestaurantIngredient>();
+}
+
+public class RestaurantDietType
+{
+    public int RestaurantId { get; set; }
+    public int DietTypeId { get; set; }
+    public Restaurant Restaurant { get; set; } = null!;
+    public DietType DietType { get; set; } = null!;
+}
+
+public class RestaurantIngredient
+{
+    public int RestaurantId { get; set; }
+    public int IngredientId { get; set; }
+    public Restaurant Restaurant { get; set; } = null!;
+    public Ingredient Ingredient { get; set; } = null!;
 }
 
 public class RestaurantFood

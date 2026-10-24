@@ -102,7 +102,7 @@ public class RecipeService(
         await recipeCategories.SetMappingsAsync(recipeId, request.CategoryIds, groups, ct);
     }
     private IQueryable<Recipe> BaseQuery() => recipes.Query().AsSplitQuery().Include(x => x.Post).Include(x => x.BMITypes).ThenInclude(x => x.BMIType).Include(x => x.CategoryMappings).ThenInclude(x => x.Category).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).Include(x => x.Steps).Include(x => x.DietCompatibilities);
-    private IQueryable<Post> PostBaseQuery() => posts.Query().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments);
+    private IQueryable<Post> PostBaseQuery() => posts.Query().AsSplitQuery().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments).Include(x => x.Recipe).ThenInclude(x => x!.DietCompatibilities).ThenInclude(x => x.DietType);
     private async Task ValidateRelationsAsync(CreateRecipeRequest request, CancellationToken ct)
     {
         await EnsureAllExistAsync((request.Ingredients ?? []).Where(x => x.AllergenId.HasValue).Select(x => x.AllergenId!.Value), allergens.Query().Select(x => x.AllergenId), "One or more allergens were not found.", ct);
@@ -129,7 +129,8 @@ public class RecipeService(
         x.Comments.Count(c => c.Status == "PUBLISHED"),
         actorId.HasValue ? x.Ratings.FirstOrDefault(r => r.UserId == actorId.Value)?.Rating : null,
         x.CreatedAt,
-        x.UpdatedAt);
+        x.UpdatedAt,
+        x.Recipe?.DietCompatibilities.Where(d => d.IsCompatible).OrderBy(d => d.DietTypeId).Select(d => new PostDietTypeResponse(d.DietTypeId, d.DietType.Name)).ToList() ?? []);
     private static void ValidateRecipeRequest(CreateRecipeRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.RecipeName) || request.RecipeName.Trim().Length > 250) throw new ServiceException("Recipe name is required and must not exceed 250 characters.");

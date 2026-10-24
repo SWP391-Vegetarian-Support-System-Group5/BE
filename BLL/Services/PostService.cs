@@ -170,7 +170,7 @@ public class PostService(
     public async Task<IReadOnlyCollection<PostResponse>> GetBookmarksAsync(int userId, CancellationToken cancellationToken = default) =>
         (await BaseQuery().Where(x => x.Bookmarks.Any(b => b.UserId == userId)).ToListAsync(cancellationToken)).Select(x => ToResponse(x, userId)).ToList();
 
-    private IQueryable<Post> BaseQuery() => posts.Query().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments);
+    private IQueryable<Post> BaseQuery() => posts.Query().AsSplitQuery().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments).Include(x => x.Recipe).ThenInclude(x => x!.DietCompatibilities).ThenInclude(x => x.DietType);
     private static PostResponse ToResponse(Post x, int? actorId = null) => new(
         x.PostId,
         x.UserId,
@@ -186,7 +186,8 @@ public class PostService(
         x.Comments.Count(c => c.Status == "PUBLISHED"),
         actorId.HasValue ? x.Ratings.FirstOrDefault(r => r.UserId == actorId.Value)?.Rating : null,
         x.CreatedAt,
-        x.UpdatedAt);
+        x.UpdatedAt,
+        x.Recipe?.DietCompatibilities.Where(d => d.IsCompatible).OrderBy(d => d.DietTypeId).Select(d => new PostDietTypeResponse(d.DietTypeId, d.DietType.Name)).ToList() ?? []);
     private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
     private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies, x.CreatedAt, x.UpdatedAt);
     private async Task<int> CountPublishedCommentsAsync(int postId, CancellationToken ct) => await comments.Query().CountAsync(x => x.PostId == postId && x.Status == "PUBLISHED", ct);

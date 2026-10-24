@@ -57,21 +57,6 @@ public sealed class LocationsController(ILocationService locationService, IOpenS
         return address is null ? NotFound(new { message = "Address was not found." }) : Ok(new { formattedAddress = address });
     }
 
-    [HttpGet("nearby-places")]
-    public async Task<ActionResult<IReadOnlyCollection<NearbyPlaceResponse>>> GetNearbyPlaces(
-        [FromQuery] decimal latitude,
-        [FromQuery] decimal longitude,
-        [FromQuery] decimal radiusKm = 15,
-        [FromQuery] string provinceCode = "",
-        [FromQuery] string areaCode = "all",
-        CancellationToken cancellationToken = default)
-    {
-        if (!ValidCoordinates(latitude, longitude)) return BadRequest(new { message = "Coordinates are invalid." });
-        if (radiusKm is < 1 or > 25) return BadRequest(new { message = "Radius must be between 1 and 25 kilometres." });
-        return Ok(await mapService.GetNearbyVegetarianPlacesAsync(
-            latitude, longitude, radiusKm, provinceCode, areaCode, cancellationToken));
-    }
-
     private static bool ValidOptionalCoordinates(decimal? latitude, decimal? longitude) =>
         latitude is null && longitude is null ||
         latitude is not null && longitude is not null && ValidCoordinates(latitude.Value, longitude.Value);
