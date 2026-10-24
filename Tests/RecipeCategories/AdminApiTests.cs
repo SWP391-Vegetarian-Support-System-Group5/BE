@@ -132,18 +132,45 @@ static class AdminApiTests
 
             var diets = await Send("GET", "/api/diet-types", 200, token: admin);
             var dietId = diets.EnumerateArray().First(x => x.GetProperty("name").GetString() == "VEGAN").GetProperty("id").GetInt32();
-            var restaurantBody = new { name="Test kitchen",address="Test address",latitude=1.0,longitude=2.0,dietTypeId=dietId,foods=new[]{"Tofu","Tofu","Rice"} };
+            var secondDietId = diets.EnumerateArray().First(x => x.GetProperty("name").GetString() == "LACTO_VEGETARIAN").GetProperty("id").GetInt32();
+            var restaurantBody = new { name="Test kitchen",address="Test address",latitude=1.0,longitude=2.0,dietTypeIds=new[]{dietId,secondDietId,secondDietId},foods=new[]{"Tofu","Tofu","Rice"} };
             var restaurant = await Send("POST", "/api/admin/restaurants", 201, restaurantBody, admin);
             var restaurantId = restaurant.GetProperty("restaurantId").GetInt32();
             if (restaurant.GetProperty("latitude").GetDecimal() != 10m || restaurant.GetProperty("longitude").GetDecimal() != 106m) throw new Exception("Restaurant coordinates must come from its address, not the client");
             if (restaurant.GetProperty("foods").GetArrayLength()!=2) throw new Exception("Restaurant foods were not deduplicated");
+            if (restaurant.GetProperty("dietTypeIds").GetArrayLength()!=2) throw new Exception("Restaurant diet types were not deduplicated");
+            var nearby = await Send("GET", $"/api/restaurants/nearby?latitude=10&longitude=106&radius=5&dietTypeId={dietId}", 200, token: user);
+            if (!nearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == restaurantId)) throw new Exception("Restaurant was not returned for its first diet type");
+            var secondDietNearby = await Send("GET", $"/api/restaurants/nearby?latitude=10&longitude=106&radius=5&dietTypeId={secondDietId}", 200, token: user);
+            if (!secondDietNearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == restaurantId)) throw new Exception("Restaurant was not returned for its second diet type");
+            await Send("GET", "/api/restaurants/nearby?latitude=10&longitude=106&radius=5&dietTypeId=99999", 404, token: user);
             await Send("GET", $"/api/restaurants/{restaurantId}", 200, token: admin);
-            await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 204, new {name="Changed kitchen",address="Changed address",dietTypeId=dietId,foods=new[]{"Soup"}}, admin);
+            int mushroomId;
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                var restaurantPlantCategoryId = await db.IngredientCategories.Where(x => x.Code == "PLANT").Select(x => x.IngredientCategoryId).SingleAsync();
+                var mushroom = new Ingredient { Name = "Mushroom", IngredientCategoryId = restaurantPlantCategoryId };
+                db.Ingredients.Add(mushroom);
+                await db.SaveChangesAsync();
+                mushroomId = mushroom.IngredientId;
+            }
+            await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 204, new {name="Changed kitchen",address="Changed address",dietTypeIds=new[]{dietId},foods=new[]{"Soup"},ingredientIds=new[]{mushroomId}}, admin);
             var updatedRestaurant = await Send("GET", $"/api/restaurants/{restaurantId}", 200, token: admin);
             if (updatedRestaurant.GetProperty("foods")[0].GetString() != "Soup") throw new Exception("Restaurant update did not replace foods");
             if (updatedRestaurant.GetProperty("latitude").GetDecimal() != 11m) throw new Exception("Changing restaurant address must refresh coordinates");
+            if (updatedRestaurant.GetProperty("ingredientIds")[0].GetInt32() != mushroomId) throw new Exception("Restaurant ingredients were not saved");
+            if (updatedRestaurant.GetProperty("dietTypeIds").GetArrayLength()!=1) throw new Exception("Restaurant diet type replacement did not remove the previous type");
+            var removedDietNearby = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={secondDietId}", 200, token: user);
+            if (removedDietNearby.GetArrayLength()!=0) throw new Exception("Removed diet type still matched nearby restaurant");
+            var withMushroom = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={dietId}&ingredient=Mushroom", 200, token: user);
+            if (!withMushroom.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == restaurantId)) throw new Exception("Restaurant ingredient filter omitted a matching restaurant");
+            var withoutMushroom = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={dietId}&ingredient=Tofu", 200, token: user);
+            if (withoutMushroom.GetArrayLength() != 0) throw new Exception("Restaurant ingredient filter returned an untagged restaurant");
             await Send("POST", "/api/admin/restaurants", 422, new {name="Unknown",address="Unknown address"}, admin);
-            await Send("POST", "/api/admin/restaurants", 404, new {name="Bad",address="Test address",dietTypeId=9999}, admin);
+            await Send("POST", "/api/admin/restaurants", 404, new {name="Bad",address="Test address",dietTypeIds=new[]{9999}}, admin);
+            await Send("POST", "/api/admin/restaurants", 400, new {name="No diet",address="Test address",dietTypeIds=Array.Empty<int>()}, admin);
+            await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 404, new {name="Changed kitchen",address="Changed address",dietTypeIds=new[]{9999}}, admin);
             await Send("GET", "/api/restaurants?food=Soup", 200, token: admin);
             await Send("DELETE", $"/api/admin/restaurants/{restaurantId}", 204, token: admin);
             await Send("GET", $"/api/restaurants/{restaurantId}", 404, token: admin);
@@ -160,6 +187,7 @@ static class AdminApiTests
 
             var post = await Send("POST", "/api/posts", 201, new {title="Test post",content="Test content",postType="BLOG"}, user);
             var postId = post.GetProperty("postId").GetInt32();
+            if (post.GetProperty("compatibleDietTypes").GetArrayLength() != 0) throw new Exception("A plain post must not claim a vegetarian type");
             var comment = await Send("POST", $"/api/posts/{postId}/comments", 201, new {content="Test comment"}, user);
             var commentId = comment.GetProperty("commentId").GetInt32();
             await Send("PUT", $"/api/admin/comments/{commentId}/visibility", 204, new { hidden=true }, admin);
@@ -201,6 +229,8 @@ static class AdminApiTests
             var bmiId = bmiTypes[0].GetProperty("id").GetInt32();
             var recipe = await Send("POST", "/api/recipes", 201, new { title="Recipe post",content="Test",recipeName="Tofu dish",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}},steps=new[]{new{stepNumber=1,instruction="Cook"}},bmiTypeIds=new[]{bmiId} }, admin);
             var recipeId = recipe.GetProperty("postId").GetInt32();
+            var recipePost = await Send("GET", $"/api/posts/{recipeId}", 200);
+            if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
             var chineseId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "chinese").GetProperty("id").GetInt32();
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{chineseId} }, admin);
             var mappedRecipes = await Send("GET", "/api/admin/recipes/bmi-types", 200, token: admin);
@@ -214,6 +244,8 @@ static class AdminApiTests
             await Send("PUT", $"/api/admin/ingredients/{ingredientId}", 200, new {name="Test cheese",ingredientCategoryId=dairyId}, admin);
             var changedRecipe = await Send("GET", $"/api/recipes/{recipeId}", 200);
             if (changedRecipe.GetProperty("ingredients")[0].GetProperty("dietaryGroup").GetString()!="DAIRY") throw new Exception("Ingredient edit did not propagate");
+            var updatedPost = await Send("GET", $"/api/posts/{recipeId}", 200);
+            if (updatedPost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Recipe post kept the vegan label after its ingredient became dairy");
             await Send("PUT", $"/api/admin/ingredients/{ingredientId}", 404, new {name="Bad",ingredientCategoryId=9999}, admin);
             await Send("PUT", "/api/admin/ingredients/9999", 404, new {name="Bad",ingredientCategoryId=plantId}, admin);
             await Send("GET", "/api/admin/recipes/bmi-types", 200, token: admin);

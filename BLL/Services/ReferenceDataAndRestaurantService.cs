@@ -1,6 +1,7 @@
 using BLL.Common;
 using BLL.DTOs;
 using DAL.Entities;
+using DAL.Data;
 using DAL.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,9 +11,12 @@ public class ReferenceDataAndRestaurantService(
     IRepository<DietType> dietTypes,
     IRepository<Allergen> allergens,
     IRepository<Restaurant> restaurants,
+    IRepository<RestaurantDietType> restaurantDietTypes,
     IRepository<RestaurantFood> restaurantFoods,
+    IRepository<RestaurantIngredient> restaurantIngredients,
     IRepository<UserAllergen> userAllergens,
-    IRepository<Ingredient> ingredients) : IReferenceDataAndRestaurantService
+    IRepository<Ingredient> ingredients,
+    VegetarianDbContext db) : IReferenceDataAndRestaurantService
 {
     public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
         (await dietTypes.Query().OrderBy(x => x.Name).ToListAsync(cancellationToken))
@@ -44,38 +48,66 @@ public class ReferenceDataAndRestaurantService(
 
     public async Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default)
     {
-        var query = restaurants.Query().Include(x => x.Foods).AsQueryable();
+        var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).AsQueryable();
         if (!string.IsNullOrWhiteSpace(food)) { var term = food.Trim().ToLower(); query = query.Where(x => x.Name.ToLower().Contains(term) || x.Foods.Any(f => f.FoodName.ToLower().Contains(term))); }
         return (await query.OrderBy(x => x.Name).ToListAsync(cancellationToken)).Select(ToRestaurant).ToList();
     }
     public async Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default)
     {
-        var entity = await restaurants.Query().Include(x => x.Foods).SingleOrDefaultAsync(x => x.RestaurantId == id, cancellationToken);
+        var entity = await restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).SingleOrDefaultAsync(x => x.RestaurantId == id, cancellationToken);
         return entity is null ? null : ToRestaurant(entity);
     }
-    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? ingredient = null, CancellationToken cancellationToken = default)
     {
         if (radiusKm <= 0) throw new ServiceException("Radius must be greater than zero.");
-        var candidates = await restaurants.Query().Include(x => x.Foods).Where(x => x.Latitude.HasValue && x.Longitude.HasValue).ToListAsync(cancellationToken);
+        if (dietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken))
+            throw new ServiceException("Diet type was not found.", 404);
+        var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes)
+            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
+            .Where(x => x.Latitude.HasValue && x.Longitude.HasValue);
+        if (dietTypeId.HasValue)
+            query = query.Where(x => x.DietTypes.Any(item => item.DietTypeId == dietTypeId.Value));
+        if (!string.IsNullOrWhiteSpace(ingredient))
+        {
+            var term = ingredient.Trim();
+            query = query.Where(x => x.Ingredients.Any(item => item.Ingredient.Name.Contains(term)));
+        }
+        var candidates = await query.ToListAsync(cancellationToken);
         return candidates.Where(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value) <= radiusKm).OrderBy(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value)).Select(ToRestaurant).ToList();
     }
     public async Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default)
     {
-        await ValidateDietTypeAsync(request.DietTypeId, cancellationToken);
-        var entity = new Restaurant { Name = request.Name.Trim(), Address = request.Address.Trim(), Latitude = request.Latitude, Longitude = request.Longitude, DietTypeId = request.DietTypeId };
+        var dietIds = await ValidateDietTypeIdsAsync(request.DietTypeIds, cancellationToken);
+        var ingredientIds = await ValidateIngredientIdsAsync(request.IngredientIds, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var entity = new Restaurant { Name = request.Name.Trim(), Address = request.Address.Trim(), Latitude = request.Latitude, Longitude = request.Longitude };
         await restaurants.AddAsync(entity, cancellationToken); await restaurants.SaveChangesAsync(cancellationToken);
-        await ReplaceFoodsAsync(entity.RestaurantId, request.Foods, cancellationToken); return (await GetRestaurantAsync(entity.RestaurantId, cancellationToken))!;
+        await ReplaceDietTypesAsync(entity.RestaurantId, dietIds, cancellationToken);
+        await ReplaceFoodsAsync(entity.RestaurantId, request.Foods, cancellationToken);
+        await ReplaceIngredientsAsync(entity.RestaurantId, ingredientIds, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return (await GetRestaurantAsync(entity.RestaurantId, cancellationToken))!;
     }
     public async Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default)
     {
         var entity = await restaurants.FindAsync(id) ?? throw new ServiceException("Restaurant was not found.", 404);
-        await ValidateDietTypeAsync(request.DietTypeId, cancellationToken);
-        entity.Name = request.Name.Trim(); entity.Address = request.Address.Trim(); entity.Latitude = request.Latitude; entity.Longitude = request.Longitude; entity.DietTypeId = request.DietTypeId;
-        await restaurants.SaveChangesAsync(cancellationToken); await ReplaceFoodsAsync(id, request.Foods, cancellationToken);
+        var dietIds = await ValidateDietTypeIdsAsync(request.DietTypeIds, cancellationToken);
+        var ingredientIds = await ValidateIngredientIdsAsync(request.IngredientIds, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        entity.Name = request.Name.Trim(); entity.Address = request.Address.Trim(); entity.Latitude = request.Latitude; entity.Longitude = request.Longitude;
+        await restaurants.SaveChangesAsync(cancellationToken); await ReplaceDietTypesAsync(id, dietIds, cancellationToken); await ReplaceFoodsAsync(id, request.Foods, cancellationToken);
+        await ReplaceIngredientsAsync(id, ingredientIds, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
     public async Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default)
     {
         var restaurant = await restaurants.FindAsync(id) ?? throw new ServiceException("Restaurant was not found.", 404);
+        foreach (var diet in await restaurantDietTypes.Query().Where(x => x.RestaurantId == id).ToListAsync(cancellationToken))
+            restaurantDietTypes.Remove(diet);
+        await restaurantDietTypes.SaveChangesAsync(cancellationToken);
+        foreach (var ingredient in await restaurantIngredients.Query().Where(x => x.RestaurantId == id).ToListAsync(cancellationToken))
+            restaurantIngredients.Remove(ingredient);
+        await restaurantIngredients.SaveChangesAsync(cancellationToken);
         foreach (var food in await restaurantFoods.Query().Where(x => x.RestaurantId == id).ToListAsync(cancellationToken))
             restaurantFoods.Remove(food);
         await restaurantFoods.SaveChangesAsync(cancellationToken);
@@ -91,11 +123,38 @@ public class ReferenceDataAndRestaurantService(
             await restaurantFoods.AddAsync(new RestaurantFood { RestaurantId = restaurantId, FoodName = name }, cancellationToken);
         await restaurantFoods.SaveChangesAsync(cancellationToken);
     }
-    private async Task ValidateDietTypeAsync(int? dietTypeId, CancellationToken cancellationToken)
+    private async Task<int[]> ValidateIngredientIdsAsync(List<int>? ids, CancellationToken ct)
     {
-        if (dietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken)) throw new ServiceException("Diet type was not found.", 404);
+        var unique = (ids ?? []).Distinct().ToArray();
+        if (await ingredients.Query().CountAsync(x => unique.Contains(x.IngredientId), ct) != unique.Length)
+            throw new ServiceException("One or more restaurant ingredients were not found.", 400);
+        return unique;
     }
-    private static RestaurantResponse ToRestaurant(Restaurant x) => new(x.RestaurantId, x.Name, x.Address, x.Latitude, x.Longitude, x.DietTypeId, x.Foods.Select(f => f.FoodName).ToList());
+    private async Task ReplaceIngredientsAsync(int restaurantId, int[] ids, CancellationToken ct)
+    {
+        var existing = await restaurantIngredients.Query().Where(x => x.RestaurantId == restaurantId).ToListAsync(ct);
+        foreach (var item in existing.Where(x => !ids.Contains(x.IngredientId))) restaurantIngredients.Remove(item);
+        foreach (var id in ids.Except(existing.Select(x => x.IngredientId)))
+            await restaurantIngredients.AddAsync(new RestaurantIngredient { RestaurantId = restaurantId, IngredientId = id }, ct);
+        await restaurantIngredients.SaveChangesAsync(ct);
+    }
+    private async Task<int[]> ValidateDietTypeIdsAsync(List<int>? ids, CancellationToken ct)
+    {
+        var unique = (ids ?? []).Distinct().ToArray();
+        if (unique.Length == 0) throw new ServiceException("Select at least one restaurant diet type.", 400);
+        if (await dietTypes.Query().CountAsync(x => unique.Contains(x.DietTypeId), ct) != unique.Length)
+            throw new ServiceException("Diet type was not found.", 404);
+        return unique;
+    }
+    private async Task ReplaceDietTypesAsync(int restaurantId, int[] ids, CancellationToken ct)
+    {
+        var existing = await restaurantDietTypes.Query().Where(x => x.RestaurantId == restaurantId).ToListAsync(ct);
+        foreach (var item in existing.Where(x => !ids.Contains(x.DietTypeId))) restaurantDietTypes.Remove(item);
+        foreach (var id in ids.Except(existing.Select(x => x.DietTypeId)))
+            await restaurantDietTypes.AddAsync(new RestaurantDietType { RestaurantId = restaurantId, DietTypeId = id }, ct);
+        await restaurantDietTypes.SaveChangesAsync(ct);
+    }
+    private static RestaurantResponse ToRestaurant(Restaurant x) => new(x.RestaurantId, x.Name, x.Address, x.Latitude, x.Longitude, x.DietTypes.Select(d => d.DietTypeId).OrderBy(id => id).ToList(), x.Foods.Select(f => f.FoodName).ToList(), x.Ingredients.Select(i => i.IngredientId).ToList(), x.Ingredients.Select(i => i.Ingredient.Name).ToList());
     private static decimal DistanceKm(decimal lat1, decimal lon1, decimal lat2, decimal lon2)
     {
         var dLat = DegreesToRadians((double)(lat2 - lat1)); var dLon = DegreesToRadians((double)(lon2 - lon1));

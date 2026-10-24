@@ -172,6 +172,8 @@ if (runDatabaseStartupTasks)
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await RestaurantIngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await services.GetRequiredService<ISeedService>().SeedAsync();

@@ -61,7 +61,7 @@ public interface IReferenceDataAndRestaurantService
     Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default);
     Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? ingredient = null, CancellationToken cancellationToken = default);
     Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default);
     Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default);
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
@@ -126,6 +126,7 @@ public interface IIngredientRecognitionService { Task<IReadOnlyCollection<Ingred
 public interface IVideoRecipeDraftService
 {
     Task<VideoRecipeDraftResponse> CreateAsync(int userId, Stream video, string fileName, string contentType, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<VideoRecipeDraftResponse>> GetMineAsync(int userId, CancellationToken cancellationToken = default);
     Task<VideoRecipeDraftResponse> GetAsync(int id, int userId, string role, CancellationToken cancellationToken = default);
     Task<VideoRecipeDraftResponse> UpdateAsync(int id, int userId, string role, UpdateVideoRecipeDraftRequest request, CancellationToken cancellationToken = default);
     Task<VideoRecipeDraftResponse> RetryAsync(int id, int userId, string role, CancellationToken cancellationToken = default);

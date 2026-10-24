@@ -14,6 +14,12 @@ if (args.Contains("--admin-api"))
     return;
 }
 
+if (args.Contains("--video-analysis"))
+{
+    await VideoAnalysisTests.RunAsync();
+    return;
+}
+
 if (args.Contains("--apply-bmi-aiven"))
 {
     await BmiTests.ApplyAivenAsync();

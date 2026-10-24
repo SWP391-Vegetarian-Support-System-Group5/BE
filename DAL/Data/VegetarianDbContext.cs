@@ -26,7 +26,9 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<Allergen> Allergens => Set<Allergen>();
     public DbSet<UserAllergen> UserAllergens => Set<UserAllergen>();
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
+    public DbSet<RestaurantDietType> RestaurantDietTypes => Set<RestaurantDietType>();
     public DbSet<RestaurantFood> RestaurantFoods => Set<RestaurantFood>();
+    public DbSet<RestaurantIngredient> RestaurantIngredients => Set<RestaurantIngredient>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
     public DbSet<MealPlanMeal> MealPlanMeals => Set<MealPlanMeal>();
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
@@ -259,6 +261,22 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
 
     private static void ConfigureRestaurants(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<RestaurantDietType>(entity =>
+        {
+            entity.ToTable("RestaurantDietTypes");
+            entity.HasKey(x => new { x.RestaurantId, x.DietTypeId });
+            entity.HasIndex(x => x.DietTypeId);
+            entity.HasOne(x => x.Restaurant).WithMany(x => x.DietTypes).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.DietType).WithMany(x => x.RestaurantMappings).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RestaurantIngredient>(entity =>
+        {
+            entity.ToTable("RestaurantIngredients");
+            entity.HasKey(x => new { x.RestaurantId, x.IngredientId });
+            entity.HasIndex(x => x.IngredientId);
+            entity.HasOne(x => x.Restaurant).WithMany(x => x.Ingredients).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Ingredient).WithMany().HasForeignKey(x => x.IngredientId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<Restaurant>(entity =>
         {
             entity.ToTable("Restaurants");
@@ -267,7 +285,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Address).HasMaxLength(300).IsRequired();
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
-            entity.HasOne(x => x.DietType).WithMany(x => x.Restaurants).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
         });
 
         modelBuilder.Entity<RestaurantFood>(entity =>
