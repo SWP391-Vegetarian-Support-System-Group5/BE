@@ -118,6 +118,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<UserProfile>(entity =>
         {
             entity.ToTable("UserProfiles");
+            entity.Property(x => x.AvatarUrl).HasMaxLength(1000);
+            entity.Property(x => x.AvatarPublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.UserId);
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);
@@ -172,6 +174,9 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<Post>(entity =>
         {
             entity.ToTable("Posts");
+            entity.Property(x => x.Status).IsConcurrencyToken();
+            entity.Property(x => x.ImageUrl).HasMaxLength(1000);
+            entity.Property(x => x.ImagePublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.PostId);
             entity.Property(x => x.Title).HasMaxLength(250).IsRequired();
             entity.Property(x => x.Content).IsRequired();
@@ -294,6 +299,9 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<MealPlanMeal>(entity =>
         {
             entity.ToTable("MealPlanMeals");
+            entity.Property(x => x.RecipeId).IsConcurrencyToken();
+            entity.Property(x => x.ImageUrl).HasMaxLength(1000);
+            entity.Property(x => x.ImagePublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.MealPlanMealId);
             entity.Property(x => x.MealType).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.HasOne(x => x.MealPlan).WithMany(x => x.Meals).HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.NoAction);

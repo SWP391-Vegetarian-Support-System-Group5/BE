@@ -1,4 +1,4 @@
-﻿using BLL.Common;
+using BLL.Common;
 using BLL.DTOs;
 using DAL.Entities;
 using DAL.Data;
@@ -21,7 +21,8 @@ public class MealPlanService(
     IRepository<MealPlanMeal> mealPlanMeals,
     IMemoryCache cache,
     IConfiguration configuration,
-    VegetarianDbContext dbContext) : IMealPlanService
+    VegetarianDbContext dbContext,
+    IImageStorage? imageStorage = null) : IMealPlanService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private sealed record MealCandidate(int Id, string Title, string Ingredients);
@@ -53,6 +54,7 @@ public class MealPlanService(
         mealPlans.Remove(oldPlan);
         await mealPlans.SaveChangesAsync(ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
+        if (transaction is not null) await CleanupImagesAsync(oldMeals.Select(m => m.ImagePublicId));
         cache.Set(cacheKey, regenCount + 1, TimeSpan.FromDays(1));
         return replacement;
     }
@@ -231,8 +233,13 @@ public class MealPlanService(
 
         if (replacement == null) throw new ServiceException("No suitable meal found for replacement.", 404);
 
+        var previousImageId = mealToReplace.ImagePublicId;
         mealToReplace.RecipeId = replacement.PostId;
+        mealToReplace.ImageUrl = null;
+        mealToReplace.ImagePublicId = null;
+        mealToReplace.ImageIsGenerated = false;
         await mealPlanMeals.SaveChangesAsync(ct);
+        await CleanupImagesAsync([previousImageId]);
 
         cache.Set(cacheKey, replaceCount + 1, TimeSpan.FromDays(7));
         return await GetByIdAsync(mealPlanId, userId, "USER", ct);
@@ -338,7 +345,7 @@ public class MealPlanService(
                 plan.StartDate,
                 plan.BMI,
                 bmiCat,
-                plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName)).ToList()
+                plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName, m.ImageUrl ?? m.Recipe.Post.ImageUrl ?? m.Recipe.Post.ThumbnailUrl, m.ImageIsGenerated)).ToList()
             );
         }).ToList();
     }
@@ -350,7 +357,7 @@ public class MealPlanService(
         string? bmiCat = null;
         if (plan.BMI.HasValue) bmiCat = MealPlannerBmi.Category(plan.BMI.Value);
 
-        return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName)).ToList());
+        return new MealPlanResponse(plan.MealPlanId, plan.StartDate, plan.BMI, bmiCat, plan.Meals.OrderBy(m => m.DayNumber).Select(m => new MealPlanMealResponse(m.MealPlanMealId, m.DayNumber, m.MealType, m.RecipeId, m.Recipe.RecipeName, m.ImageUrl ?? m.Recipe.Post.ImageUrl ?? m.Recipe.Post.ThumbnailUrl, m.ImageIsGenerated)).ToList());
     }
     public async Task DeleteAsync(int id, int userId, string role, CancellationToken cancellationToken = default)
     {
@@ -368,5 +375,14 @@ public class MealPlanService(
         await mealPlanMeals.SaveChangesAsync(cancellationToken);
         mealPlans.Remove(plan);
         await mealPlans.SaveChangesAsync(cancellationToken);
+        await CleanupImagesAsync(meals.Select(m => m.ImagePublicId));
+    }
+
+    private async Task CleanupImagesAsync(IEnumerable<string?> ids)
+    {
+        if (imageStorage is null) return;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        foreach (var id in ids.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct())
+            await imageStorage.DeleteAsync(id!, timeout.Token);
     }
 }

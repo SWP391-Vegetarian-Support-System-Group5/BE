@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using CloudinaryDotNet;
+using System.Threading.RateLimiting;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,6 +55,25 @@ builder.Services.AddSingleton<ICommunityEventPublisher>(provider => provider.Get
 builder.Services.AddMemoryCache();
 var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
 builder.Services.AddSingleton(cloudinarySettings);
+builder.Services.AddSingleton<IImageStorage, CloudinaryImageStorage>();
+builder.Services.AddScoped<MediaImageService>();
+builder.Services.AddSingleton(new ImageGenerationSettings
+{
+    ApiKey = builder.Configuration["GeminiImages:ApiKey"] ?? builder.Configuration["Gemini:ApiKey"] ?? "",
+    Model = builder.Configuration["GeminiImages:Model"] ?? "gemini-2.5-flash-image"
+});
+builder.Services.AddHttpClient<IMealImageGenerator, GeminiMealImageGenerator>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("image-generation", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.GetRequiredUserId(), _ => new FixedWindowRateLimiterOptions
+        { PermitLimit = 3, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+});
 var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
@@ -173,12 +193,14 @@ app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
 
 if (runDatabaseStartupTasks)
 {
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
+    await ImageSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());

@@ -127,7 +127,7 @@ public class AuthService(
         user.Profile?.DietTypeId,
         user.Profile?.Latitude,
         user.Profile?.Longitude,
-        user.IsActive);
+        user.IsActive, user.Profile?.AvatarUrl);
 
     private async Task<EmailOtpSentResponse> CreateAndSendOtpAsync(string email, string purpose, CancellationToken cancellationToken)
     {
