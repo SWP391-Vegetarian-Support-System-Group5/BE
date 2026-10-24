@@ -109,7 +109,16 @@ builder.Services.Configure<ApiBehaviorOptions>(options => options.InvalidModelSt
         .ToArray();
     return new BadRequestObjectResult(new { success = false, message = "Validation failed.", errors });
 });
-builder.Services.AddCors(options => options.AddPolicy("DevelopmentFrontend", policy => policy.WithOrigins("http://localhost:3000", "http://localhost:4200", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod().AllowCredentials().SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
+builder.Services.AddCors(options => options.AddPolicy("DevelopmentFrontend", policy => policy
+    .WithOrigins(
+        "http://localhost:3000",
+        "http://localhost:4200",
+        "http://localhost:5173",
+        "https://veggie-mate-system.vercel.app")
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials()
+    .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
@@ -160,6 +169,7 @@ var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetVal
 if (swaggerEnabled) { app.UseSwagger(); app.UseSwaggerUI(); }
 if (runDatabaseStartupTasks) app.UseHttpsRedirection();
 app.UseStaticFiles();
+app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
