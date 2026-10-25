@@ -12,9 +12,11 @@ namespace API.Controllers;
 public sealed class LocationsController(ILocationService locationService, IOpenStreetMapService mapService) : ControllerBase
 {
     [HttpGet("provinces")]
+    [AllowAnonymous]
     public ActionResult<IReadOnlyCollection<ProvinceResponse>> GetProvinces() => Ok(locationService.GetProvinces());
 
     [HttpGet("provinces/{provinceCode}/areas")]
+    [AllowAnonymous]
     public ActionResult<IReadOnlyCollection<AreaResponse>> GetAreas(string provinceCode)
     {
         var areas = locationService.GetAreas(provinceCode);

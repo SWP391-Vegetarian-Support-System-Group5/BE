@@ -194,7 +194,14 @@ public class HealthService(IRepository<DietType> dietTypes) : IHealthService
 {
     public async Task<bool> CanConnectAsync(CancellationToken cancellationToken = default)
     {
-        await dietTypes.Query().Select(x => x.DietTypeId).Take(1).ToListAsync(cancellationToken);
-        return true;
+        try
+        {
+            await dietTypes.Query().Select(x => x.DietTypeId).Take(1).ToListAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 }

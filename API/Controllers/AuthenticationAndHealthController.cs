@@ -57,11 +57,13 @@ public class AuthenticationController(IAuthService authService, IJwtTokenService
 
 [ApiController]
 [Route("api/health")]
-public class HealthController(IHealthService healthService) : ControllerBase
+public class HealthController : ControllerBase
 {
     [HttpGet]
     public IActionResult Get() => Ok(new { status = "Healthy" });
 
     [HttpGet("db")]
-    public async Task<IActionResult> Database(CancellationToken cancellationToken) => await healthService.CanConnectAsync(cancellationToken) ? Ok(new { status = "Healthy" }) : StatusCode(503, new { success = false, message = "Database is unavailable.", errors = Array.Empty<string>() });
+    public async Task<IActionResult> Database(
+        [FromServices] IHealthService healthService,
+        CancellationToken cancellationToken) => await healthService.CanConnectAsync(cancellationToken) ? Ok(new { status = "Healthy" }) : StatusCode(503, new { success = false, message = "Database is unavailable.", errors = Array.Empty<string>() });
 }
