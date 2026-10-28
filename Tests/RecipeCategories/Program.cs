@@ -128,7 +128,7 @@ db.Users.Add(new User { UserId = 1, Email = "test@example.invalid", PasswordHash
 await db.SaveChangesAsync();
 var events = new TestEvents();
 var ingredientCatalog = new IngredientCatalogService(db, service, events);
-var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), events, service, ingredientCatalog, db, new RecipeBmiService(db, events));
+var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), new Repository<ModerationFlag>(db), new MockModerationAiService(), events, service, ingredientCatalog, db, new RecipeBmiService(db, events));
 var dinner = await db.RecipeCategories.SingleAsync(c => c.Slug == "dinner");
 var request = new CreateRecipeRequest("Test post", "Test content", null, 10, 10, 2, null,
     [new("Rice", "100g", "PLANT", null)], [new(1, "Cook rice")], "Rice bowl", [dinner.Id]);
@@ -154,6 +154,8 @@ Check(reclassified.CompatibleDietTypeIds.Contains(veganDietId), "shared category
 Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared ingredient edit publishes recipe refresh event");
 
 await BmiTests.RunAsync();
+await NotificationTests.RunAsync();
+await CustomAllergenTests.RunAsync();
 
 sealed class TestEvents : ICommunityEventPublisher
 {

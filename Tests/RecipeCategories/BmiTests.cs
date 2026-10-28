@@ -49,10 +49,15 @@ static class BmiTests
         await categories.SeedAsync(default);
         var bmi = new RecipeBmiService(db, events);
         var catalog = new IngredientCatalogService(db, categories, events);
-        var recipes = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), events, categories, catalog, db, bmi);
+        var recipes = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), new Repository<ModerationFlag>(db), new MockModerationAiService(), events, categories, catalog, db, bmi);
         var request = new CreateRecipeRequest("Post title", "Content", null, 10, 10, 2, null,
             [new("Tofu", "100g", "PLANT", null)], [new(1, "Cook")], "Tofu dish", [], [normal.BMITypeId, under.BMITypeId]);
         var recipe = await recipes.CreateAsync(100, request);
+        var held = await recipes.CreateAsync(101, request with { Title = "spam", RecipeName = "Held tofu", BmiTypeIds = null });
+        Check(held.Status == "DRAFT" && !string.IsNullOrWhiteSpace(held.ModerationReason), "AI rejection keeps recipe in editable draft");
+        await Reject(() => recipes.GetAsync(held.PostId), 404, "public cannot read rejected draft");
+        await recipes.UpdateAsync(held.PostId, 101, "USER", request with { Title = "Clean tofu", RecipeName = "Held tofu", BmiTypeIds = null });
+        Check((await recipes.GetAsync(held.PostId)).Status == "PUBLISHED", "edited draft publishes only after fresh review");
         Check(recipe.BmiTypes!.Count == 2, "admin create stores multiple groups and returns them");
         var chinese = await db.RecipeCategories.SingleAsync(x => x.Slug == "chinese");
         await categories.UpdateRecipeMappingsAsync(recipe.PostId, [chinese.Id], default);
@@ -69,7 +74,7 @@ static class BmiTests
         var wrongBmi = await recipes.CreateAsync(100, request with { RecipeName = "Other BMI tofu", BmiTypeIds = [obese.BMITypeId] });
         var dairy = await recipes.CreateAsync(100, request with { RecipeName = "Dairy dish", Ingredients = [new("Milk", "100ml", "DAIRY", null)], BmiTypeIds = [normal.BMITypeId] });
         using var cache = new MemoryCache(new MemoryCacheOptions());
-        var planner = new MealPlanService(new Repository<User>(db), new Repository<Recipe>(db), new Repository<MealPlan>(db), new Repository<MealPlanMeal>(db), cache, db);
+        var planner = new MealPlanService(new Repository<User>(db), new Repository<Recipe>(db), new Repository<MealPlan>(db), new Repository<MealPlanMeal>(db), cache, db, new TestAllergenMatcher());
         var plan = await planner.GenerateAsync(101, new GenerateMealPlanRequest(null, "đậu hũ"));
         Check(plan.Meals.Count == 21 && plan.Meals.All(x => x.RecipeId == recipe.PostId), "planner excludes unassigned, wrong-BMI and non-vegan recipes in local fallback");
         Check(IngredientPreferences.MatchCount(["Tofu"], IngredientPreferences.Parse("đậu hũ")) == 1, "ingredient ranking reuses bilingual matching");
@@ -103,6 +108,14 @@ static class BmiTests
         await db.SaveChangesAsync();
         var allergySafe = await planner.GenerateAsync(101, new(null, "Peanut"));
         Check(allergySafe.Meals.All(x => x.RecipeId != unsafeRecipe.PostId), "profile allergens override ingredient preference");
+        var sesameRecipe = await recipes.CreateAsync(100, request with { RecipeName = "Sesame bowl", Ingredients = [new("Sesame", "50g", "PLANT", null)], BmiTypeIds = [normal.BMITypeId] });
+        var sesamePlan = await planner.GenerateAsync(101, new(null, "Sesame"));
+        Check(sesamePlan.Meals.First().RecipeId == sesameRecipe.PostId, "recipe with new ingredient is selectable before allergy is recorded");
+        db.UserAllergens.Add(new UserAllergen { UserId = 101, Allergen = new Allergen { Name = "Mè" } });
+        await db.SaveChangesAsync();
+        Check(!(await planner.GetAsync(101)).Any(x => x.MealPlanId == sesamePlan.MealPlanId), "adding custom allergy invalidates existing unsafe plan");
+        var sesameSafe = await planner.GenerateAsync(101, new(null, "Sesame"));
+        Check(sesameSafe.Meals.All(x => x.RecipeId != sesameRecipe.PostId), "AI allergy match excludes recipe without Ingredient.AllergenId");
         await bmi.UpdateAsync(otherIngredients.PostId, [], 100, default);
         await recipes.UpdateAsync(recipe.PostId, 100, "ADMIN", request with { BmiTypeIds = [normal.BMITypeId, under.BMITypeId] });
         Check((await recipes.GetAsync(recipe.PostId)).BmiTypes!.Count == 2, "recipe update persists BMI groups");
@@ -123,6 +136,18 @@ static class BmiTests
         Check(MealPlannerBmi.Category(18.49m) == "Underweight" && MealPlannerBmi.Category(18.5m) == "Normal" && MealPlannerBmi.Category(25m) == "Obese", "existing boundaries unchanged with project-approved OBESE name");
         var controller = typeof(RecipeBmiController);
         Check(new[] { "Update", "Recipes", "UpdateCategories" }.All(name => controller.GetMethod(name)!.GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>().Any(x => x.Roles == "ADMIN")), "server endpoints require ADMIN role");
+    }
+
+    private sealed class TestAllergenMatcher : IAllergenIngredientMatcher
+    {
+        public Task<IReadOnlySet<int>> FindUnsafeAsync(IReadOnlyCollection<Allergen> allergens, IReadOnlyCollection<Ingredient> ingredients, CancellationToken cancellationToken = default)
+        {
+            IReadOnlySet<int> ids = ingredients.Where(item => allergens.Any(allergy =>
+                AllergenLexicon.Terms(allergy).Any(term => AllergenLexicon.ContainsTerm(item.Name, term)) ||
+                AllergenLexicon.Normalize(allergy.Name) == "me" && item.Name.Equals("Sesame", StringComparison.OrdinalIgnoreCase)))
+                .Select(item => item.IngredientId).ToHashSet();
+            return Task.FromResult(ids);
+        }
     }
 
     public static async Task ApplyAivenAsync()

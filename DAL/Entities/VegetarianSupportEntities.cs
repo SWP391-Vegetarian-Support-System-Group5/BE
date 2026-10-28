@@ -70,6 +70,7 @@ public class Post
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<PostRating> Ratings { get; set; } = new List<PostRating>();
     public ICollection<Bookmark> Bookmarks { get; set; } = new List<Bookmark>();
+    public ICollection<ModerationFlag> ModerationFlags { get; set; } = new List<ModerationFlag>();
 }
 
 public class Comment
@@ -246,6 +247,7 @@ public class ChatMessage
 public class VideoRecipeDraft
 {
     public int VideoRecipeDraftId { get; set; }
+    public int? RecipePostId { get; set; }
     public int UserId { get; set; }
     public string VideoUrl { get; set; } = null!;
     public string? GeminiFileName { get; set; }

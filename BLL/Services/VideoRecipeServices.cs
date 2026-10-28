@@ -463,6 +463,7 @@ public sealed class VideoRecipeDraftService(
     LocalVideoStorage storage,
     IVideoRecipeAnalyzer analyzer,
     IRecipeService recipes,
+    IModerationAiService moderationAiService,
     Microsoft.Extensions.Logging.ILogger<VideoRecipeDraftService> logger,
     VideoRecipeSettings settings) : IVideoRecipeDraftService
 {
@@ -519,6 +520,17 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "READY") throw new ServiceException("Only a ready video draft can be published.", 409);
+        if (!string.IsNullOrWhiteSpace(draft.Transcript))
+        {
+            var transcriptReason = await moderationAiService.FlagReasonAsync($"Lời nói trong video: {draft.Transcript}", ct);
+            if (transcriptReason is not null)
+            {
+                draft.ErrorMessage = transcriptReason;
+                draft.UpdatedAt = VietnamTime.Now;
+                await drafts.SaveChangesAsync(ct);
+                throw new ServiceException(transcriptReason, 422);
+            }
+        }
         if (!VegetarianDietRules.IsVerifiedVegetarianRecipe(draft.Ingredients.Select(x => x.DietaryGroup)))
             throw new ServiceException("Bản nháp có nguyên liệu không chay hoặc chưa xác minh. Không thể đăng công thức.", 422);
         if (!LocalVideoStorage.IsCloudVideo(draft.VideoUrl))
@@ -527,8 +539,22 @@ public sealed class VideoRecipeDraftService(
             draft.UpdatedAt = VietnamTime.Now;
             await drafts.SaveChangesAsync(ct);
         }
-        var recipe = await recipes.CreateAsync(draft.UserId, new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, request.BmiTypeIds), ct);
-        draft.Status = "PUBLISHED"; draft.UpdatedAt = VietnamTime.Now; await drafts.SaveChangesAsync(ct);
+        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, request.BmiTypeIds);
+        RecipeResponse recipe;
+        if (draft.RecipePostId.HasValue)
+        {
+            await recipes.UpdateAsync(draft.RecipePostId.Value, userId, role, recipeRequest, ct);
+            recipe = await recipes.GetAsync(draft.RecipePostId.Value, ct, userId, role);
+        }
+        else
+        {
+            recipe = await recipes.CreateAsync(draft.UserId, recipeRequest, ct);
+            draft.RecipePostId = recipe.PostId;
+        }
+        draft.Status = recipe.Status == "PUBLISHED" ? "PUBLISHED" : "READY";
+        draft.ErrorMessage = recipe.ModerationReason;
+        draft.UpdatedAt = VietnamTime.Now;
+        await drafts.SaveChangesAsync(ct);
         return recipe;
     }
 
@@ -536,6 +562,7 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status == "PUBLISHED") throw new ServiceException("A published draft keeps its video as part of the recipe.", 409);
+        if (draft.RecipePostId.HasValue) await recipes.DeleteAsync(draft.RecipePostId.Value, userId, role, ct);
         storage.Delete(draft.VideoUrl); drafts.Remove(draft); await drafts.SaveChangesAsync(ct);
     }
 
@@ -748,5 +775,5 @@ public sealed class VideoRecipeDraftService(
             : throw new ServiceException("Video recipe draft was not found.", 404);
 
     private static string GetContentType(string videoUrl) => Path.GetExtension(videoUrl).ToLowerInvariant() switch { ".mp4" => "video/mp4", ".mov" => "video/quicktime", ".webm" => "video/webm", ".avi" => "video/avi", _ => "application/octet-stream" };
-    private static VideoRecipeDraftResponse ToResponse(VideoRecipeDraft x) => new(x.VideoRecipeDraftId, x.Status, LocalVideoStorage.IsCloudVideo(x.VideoUrl) ? x.VideoUrl : string.Empty, x.Title, x.Description, x.Transcript, x.EstimatedPrepMinutes, x.Ingredients.OrderBy(i => i.VideoRecipeDraftIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.ErrorMessage, x.CreatedAt, x.UpdatedAt, x.RecipeName);
+    private static VideoRecipeDraftResponse ToResponse(VideoRecipeDraft x) => new(x.VideoRecipeDraftId, x.Status, LocalVideoStorage.IsCloudVideo(x.VideoUrl) ? x.VideoUrl : string.Empty, x.Title, x.Description, x.Transcript, x.EstimatedPrepMinutes, x.Ingredients.OrderBy(i => i.VideoRecipeDraftIngredientId).Select(i => new IngredientRequest(i.IngredientName, i.Amount, i.DietaryGroup, i.AllergenId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.ErrorMessage, x.CreatedAt, x.UpdatedAt, x.RecipeName, x.RecipePostId);
 }

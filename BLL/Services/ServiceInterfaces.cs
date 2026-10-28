@@ -1,4 +1,5 @@
 using BLL.DTOs;
+using DAL.Entities;
 
 namespace BLL.Services;
 
@@ -38,6 +39,18 @@ public interface IUserAllergenService
 {
     Task<UserAllergensResponse> GetAsync(int userId, CancellationToken cancellationToken = default);
     Task<UserAllergensResponse> UpdateAsync(int userId, UpdateUserAllergensRequest request, CancellationToken cancellationToken = default);
+    Task<UserAllergensResponse> AddCustomAsync(int userId, string name, CancellationToken cancellationToken = default);
+}
+
+public record ValidatedAllergenName(string Name);
+public interface IAllergenNameValidator
+{
+    Task<ValidatedAllergenName> ValidateAsync(string input, IReadOnlyCollection<Allergen> existing, CancellationToken cancellationToken = default);
+}
+
+public interface IAllergenIngredientMatcher
+{
+    Task<IReadOnlySet<int>> FindUnsafeAsync(IReadOnlyCollection<Allergen> allergens, IReadOnlyCollection<Ingredient> ingredients, CancellationToken cancellationToken = default);
 }
 
 public interface IUserProfileService
@@ -93,7 +106,7 @@ public interface IPostService
 public interface IRecipeService
 {
     Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default);
-    Task<RecipeResponse> GetAsync(int id, CancellationToken cancellationToken = default);
+    Task<RecipeResponse> GetAsync(int id, CancellationToken cancellationToken = default, int? actorId = null, string? role = null);
     Task UpdateAsync(int id, int actorId, string role, CreateRecipeRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, CancellationToken cancellationToken = default);
@@ -136,6 +149,14 @@ public interface IVideoRecipeDraftService
     Task<VideoRecipeDraftResponse> CreateManualAsync(int userId, Stream videoStream, string fileName, string contentType, CreateManualVideoRecipeDraftRequest request, CancellationToken ct = default);
 }
 public interface IModerationAiService { Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default); }
+public interface INotificationEventPublisher { Task SendAsync(int userId, UserNotificationResponse notification, CancellationToken cancellationToken = default); }
+public interface IUserNotificationService
+{
+    Task CreateAsync(int userId, string type, string message, int? postId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<UserNotificationResponse>> GetAsync(int userId, CancellationToken cancellationToken = default);
+    Task<int> CountUnreadAsync(int userId, CancellationToken cancellationToken = default);
+    Task MarkReadAsync(int userId, long id, CancellationToken cancellationToken = default);
+}
 
 public record CommunityEvent(string Type, int? PostId, PostResponse? Post = null, CommentResponse? Comment = null, double? AverageRating = null, int? RatingCount = null, int? CommentCount = null);
 public interface ICommunityEventPublisher
