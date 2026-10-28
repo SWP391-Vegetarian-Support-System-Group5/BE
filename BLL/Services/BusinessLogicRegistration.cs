@@ -23,10 +23,10 @@ public static class BusinessLogicRegistration
         services.AddScoped<IChatService, NutritionChatbotService>();
         services.AddScoped<IVideoRecipeDraftService, VideoRecipeDraftService>();
         services.AddScoped<IModerationService, ModerationService>();
+        services.AddSingleton<IUserNotificationService, UserNotificationService>();
         services.AddScoped<ISeedService, SeedService>();
         services.AddScoped<IHealthService, HealthService>();
         services.AddSingleton<IIngredientRecognitionService, MockIngredientRecognitionService>();
-        services.AddSingleton<IModerationAiService, MockModerationAiService>();
         return services;
     }
 }

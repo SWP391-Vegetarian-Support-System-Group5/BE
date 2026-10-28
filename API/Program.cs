@@ -51,6 +51,8 @@ builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseMySql(
 builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddSingleton<CommunityEventStream>();
 builder.Services.AddSingleton<ICommunityEventPublisher>(provider => provider.GetRequiredService<CommunityEventStream>());
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<INotificationEventPublisher, SignalRNotificationPublisher>();
 builder.Services.AddMemoryCache();
 var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
 builder.Services.AddSingleton(cloudinarySettings);
@@ -64,6 +66,21 @@ builder.Services.AddHttpClient("Gemini", client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(geminiSettings.ChatTimeoutSeconds, 10, 120));
+});
+builder.Services.AddHttpClient<IModerationAiService, GeminiModerationAiService>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddHttpClient<IAllergenIngredientMatcher, GeminiAllergenIngredientMatcher>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(20);
 });
 builder.Services.AddHttpClient("GeminiFiles", client =>
 {
@@ -121,6 +138,17 @@ builder.Services.AddCors(options => options.AddPolicy("DevelopmentFrontend", pol
     .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            // Negotiation uses the Authorization header; WebSocket upgrades use the query token.
+            if (context.Request.Path.StartsWithSegments("/hubs/notifications") &&
+                !string.IsNullOrEmpty(context.Request.Query["access_token"]))
+                context.Token = context.Request.Query["access_token"];
+            return Task.CompletedTask;
+        }
+    };
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -174,6 +202,7 @@ app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 if (runDatabaseStartupTasks)
 {
@@ -186,6 +215,7 @@ if (runDatabaseStartupTasks)
     await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
+    await VideoRecipeDraftSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }
 else

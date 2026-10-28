@@ -21,6 +21,7 @@ public class NutritionChatbotService(
     IRepository<Recipe> recipes,
     IAiChatService aiChatService,
     IKnowledgeBaseService knowledgeBaseService,
+    IAllergenIngredientMatcher allergenMatcher,
     ILogger<NutritionChatbotService>? logger = null) : IChatService
 {
     private const int GuestMessageLimit = 5;
@@ -72,8 +73,8 @@ public class NutritionChatbotService(
 
         var user = userId.HasValue ? await users.Query().AsNoTracking().Include(x => x.Profile).ThenInclude(x => x!.DietType)
             .Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) : null;
-        var userAllergenNames = user?.UserAllergens.Select(x => x.Allergen.Name).ToArray() ?? [];
-        if (TryBuildAllergenConflictReply(request.Content, userAllergenNames, out var blockedReply))
+        var userAllergens = user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [];
+        if (TryBuildAllergenConflictReply(request.Content, userAllergens, out var blockedReply))
         {
             var blockedResponse = new ChatMessage { ChatSessionId = id, Sender = "AI", Content = blockedReply, CreatedAt = VietnamTime.Now };
             await messages.AddAsync(blockedResponse, cancellationToken);
@@ -99,16 +100,14 @@ public class NutritionChatbotService(
         return new(response.ChatMessageId, chatbotReply.Answer, relatedRecipes, knowledge.Sources, remainingMessages, false);
     }
 
-    private static bool TryBuildAllergenConflictReply(string message, IReadOnlyCollection<string> userAllergens, out string reply)
+    private static bool TryBuildAllergenConflictReply(string message, IReadOnlyCollection<Allergen> userAllergens, out string reply)
     {
-        var normalizedMessage = NormalizeForMatch(message);
         foreach (var allergen in userAllergens)
         {
-            var aliases = GetAllergenAliases(allergen).Select(NormalizeForMatch).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
-            var matchedAlias = aliases.FirstOrDefault(alias => ContainsIngredientTerm(normalizedMessage, alias));
+            var matchedAlias = GetAllergenAliases(allergen).FirstOrDefault(alias => AllergenLexicon.ContainsTerm(message, alias));
             if (matchedAlias is null) continue;
 
-            reply = BuildAllergenConflictReply(allergen);
+            reply = BuildAllergenConflictReply(allergen.Name);
             return true;
         }
 
@@ -116,28 +115,12 @@ public class NutritionChatbotService(
         return false;
     }
 
-    private static IEnumerable<string> GetAllergenAliases(string allergen)
+    private static IEnumerable<string> GetAllergenAliases(Allergen allergen)
     {
-        yield return allergen;
-        if (AllergenAliases.TryGetValue(allergen, out var aliases))
+        foreach (var term in AllergenLexicon.Terms(allergen)) yield return term;
+        if (AllergenAliases.TryGetValue(allergen.Name, out var aliases))
             foreach (var alias in aliases)
                 yield return alias;
-    }
-
-    private static bool ContainsIngredientTerm(string normalizedMessage, string normalizedAlias)
-    {
-        if (normalizedAlias.Length == 0) return false;
-        return Regex.IsMatch(normalizedMessage, $@"(^|[^\p{{L}}\p{{N}}]){Regex.Escape(normalizedAlias)}($|[^\p{{L}}\p{{N}}])", RegexOptions.IgnoreCase);
-    }
-
-    private static string NormalizeForMatch(string value)
-    {
-        var normalized = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-        foreach (var ch in normalized)
-            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
-                builder.Append(ch);
-        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string BuildAllergenConflictReply(string allergen) =>
@@ -165,8 +148,21 @@ public class NutritionChatbotService(
         }
         var ranking = Expression.Lambda<Func<Recipe, int>>(score, parameter);
         var matched = Expression.Lambda<Func<Recipe, bool>>(Expression.GreaterThan(score, Expression.Constant(0)), parameter);
-        return await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId).Take(5)
-            .Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToListAsync(ct);
+        // Check names and aliases after SQL ranking: user-defined allergies may not
+        // have an Ingredient.AllergenId assigned in the shared catalog yet.
+        var candidates = await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId).Take(30)
+            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
+            .AsSplitQuery().ToListAsync(ct);
+        var unsafeIds = await allergenMatcher.FindUnsafeAsync(user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [],
+            candidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
+        return candidates
+            .Where(recipe => !recipe.Ingredients.Any(item =>
+                unsafeIds.Contains(item.IngredientId) ||
+                user?.UserAllergens.Any(allergy =>
+                    !(item.Ingredient.Category.DietaryGroup == VegetarianDietRules.Plant &&
+                      allergy.Allergen.Name.Equals("Milk", StringComparison.OrdinalIgnoreCase)) &&
+                    AllergenLexicon.Terms(allergy.Allergen).Any(term => AllergenLexicon.ContainsTerm(item.Ingredient.Name, term))) == true))
+            .Take(5).Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToList();
     }
 
     private sealed class RecipeParameterVisitor(ParameterExpression source, ParameterExpression target) : ExpressionVisitor
@@ -176,10 +172,11 @@ public class NutritionChatbotService(
 
     private static string BuildApplicationContext(User? user, IEnumerable<ChatMessage> previousMessages, IReadOnlyCollection<RelatedRecipeResponse> relatedRecipes)
     {
-        var allergenNames = user?.UserAllergens.Select(x => x.Allergen.Name).ToArray() ?? [];
-        var allergenBlocklist = allergenNames.Length == 0
+        var allergens = user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [];
+        var allergenNames = allergens.Select(x => x.Name).ToArray();
+        var allergenBlocklist = allergens.Length == 0
             ? "None."
-            : string.Join("; ", allergenNames.Select(x => $"{x}: {string.Join(", ", GetAllergenAliases(x).Distinct(StringComparer.OrdinalIgnoreCase))}"));
+            : string.Join("; ", allergens.Select(x => $"{x.Name}: {string.Join(", ", GetAllergenAliases(x).Distinct(StringComparer.OrdinalIgnoreCase))}"));
         var profile = user is null ? "Guest user. No diet or allergen profile is available." : $"Diet type: {user.Profile?.DietType?.Name ?? "Not specified"}. Allergens: {string.Join(", ", allergenNames)}.";
         var recipeContext = relatedRecipes.Count == 0 ? "No matching recipes were found." : string.Join("\n", relatedRecipes.Select(x => $"- RecipeId {x.RecipeId}: {x.Title}"));
         var history = string.Join("\n", previousMessages.OrderByDescending(x => x.ChatMessageId).Take(10).Reverse().Select(x => $"{x.Sender}: {x.Content}"));
