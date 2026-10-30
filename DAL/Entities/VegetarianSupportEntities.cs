@@ -115,6 +115,7 @@ public class Recipe
     public decimal? Servings { get; set; }
     public decimal? CaloriesPerServing { get; set; }
     public string? VideoUrl { get; set; }
+    public string? ImageUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
     public ICollection<RecipeStep> Steps { get; set; } = new List<RecipeStep>();
@@ -172,6 +173,7 @@ public class Restaurant
     public int RestaurantId { get; set; }
     public string Name { get; set; } = null!;
     public string Address { get; set; } = null!;
+    public string? ImageUrl { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
     public ICollection<RestaurantDietType> DietTypes { get; set; } = new List<RestaurantDietType>();

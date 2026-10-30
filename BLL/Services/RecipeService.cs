@@ -26,16 +26,17 @@ public class RecipeService(
     public async Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default)
     {
         ValidateRecipeRequest(request);
+        var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         await recipeBmi.ValidateAsync(request.BmiTypeIds, userId, cancellationToken);
         await ValidateRelationsAsync(request, cancellationToken);
         var moderationReason = await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
-        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl };
+        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl, ImageUrl = imageUrl };
         await recipes.AddAsync(recipe, cancellationToken);
         await ReplaceDetailsAsync(recipe.PostId, request, cancellationToken);
         await recipeBmi.SetMappingsAsync(recipe.PostId, request.BmiTypeIds, cancellationToken);
@@ -58,6 +59,7 @@ public class RecipeService(
     public async Task UpdateAsync(int id, int actorId, string role, CreateRecipeRequest request, CancellationToken cancellationToken = default)
     {
         ValidateRecipeRequest(request);
+        var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
@@ -67,13 +69,13 @@ public class RecipeService(
         var wasPublished = recipe.Post.Status == "PUBLISHED";
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
-        recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
+        recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
         recipe.Post.Status = moderationReason is null ? "PUBLISHED" : "DRAFT";
         var pendingFlags = await moderationFlags.Query().Where(f => f.PostId == id && f.Source == "AI" && f.Status == "PENDING").ToListAsync(cancellationToken);
         foreach (var flag in pendingFlags) flag.Status = "APPROVED";
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
         recipe.RecipeName = request.RecipeName.Trim();
-        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl;
+        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
         foreach (var item in recipe.Ingredients) ingredients.Remove(item);
         foreach (var item in recipe.Steps) steps.Remove(item);
         foreach (var item in recipe.DietCompatibilities) dietCompatibilities.Remove(item);
@@ -131,7 +133,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), x.BMITypes.Select(m => new BmiTypeResponse(m.BMITypeId, m.BMIType.Code, m.BMIType.Name, m.BMIType.Description)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null);
+    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), x.BMITypes.Select(m => new BmiTypeResponse(m.BMITypeId, m.BMIType.Code, m.BMIType.Name, m.BMIType.Description)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl);
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,

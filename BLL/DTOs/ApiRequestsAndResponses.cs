@@ -13,7 +13,8 @@ public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Requ
 public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
-public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive);
+public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, DateTime? BirthDate, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null);
+public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
     string? Sex,
@@ -39,8 +40,8 @@ public record AllergenRequest([Required, MaxLength(150)] string Name);
 public record CatalogItemResponse(int Id, string Name, string? Type = null);
 public record ProvinceResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
 public record AreaResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
-public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, List<int>? DietTypeIds, List<string>? Foods, List<int>? IngredientIds = null);
-public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, IReadOnlyCollection<int> DietTypeIds, IReadOnlyCollection<string> Foods, IReadOnlyCollection<int> IngredientIds, IReadOnlyCollection<string> IngredientNames);
+public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, List<int>? DietTypeIds, List<string>? Foods, List<int>? IngredientIds = null, [MaxLength(1000)] string? ImageUrl = null);
+public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, IReadOnlyCollection<int> DietTypeIds, IReadOnlyCollection<string> Foods, IReadOnlyCollection<int> IngredientIds, IReadOnlyCollection<string> IngredientNames, string? ImageUrl = null);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl, string? Status);
 public record PostDietTypeResponse(int Id, string Name);
@@ -55,8 +56,8 @@ public record IngredientCategoryRequest([Required, MaxLength(30)] string Code, [
 public record IngredientResponse(int Id, string Name, int IngredientCategoryId, string DietaryGroup, int? AllergenId);
 public record UpdateIngredientRequest([Required, MaxLength(200)] string Name, [Range(1, int.MaxValue)] int IngredientCategoryId, int? AllergenId);
 public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber, [Required] string Instruction);
-public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, [Range(1, 5000)] decimal? CaloriesPerServing, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, [Required, MaxLength(250)] string RecipeName, List<int>? CategoryIds = null, List<int>? BmiTypeIds = null);
-public record RecipeResponse(int PostId, string Title, string Content, string Status, string? VideoUrl, string? ThumbnailUrl, int? PrepMinutes, int? CookMinutes, decimal? Servings, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds, string RecipeName, IReadOnlyCollection<RecipeCategoryResponse> Categories, IReadOnlyCollection<BmiTypeResponse>? BmiTypes = null, string? ModerationReason = null);
+public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, [Range(1, 5000)] decimal? CaloriesPerServing, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, [Required, MaxLength(250)] string RecipeName, List<int>? CategoryIds = null, List<int>? BmiTypeIds = null, [MaxLength(1000)] string? ImageUrl = null);
+public record RecipeResponse(int PostId, string Title, string Content, string Status, string? VideoUrl, string? ThumbnailUrl, int? PrepMinutes, int? CookMinutes, decimal? Servings, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds, string RecipeName, IReadOnlyCollection<RecipeCategoryResponse> Categories, IReadOnlyCollection<BmiTypeResponse>? BmiTypes = null, string? ModerationReason = null, string? ImageUrl = null);
 public record BmiTypeResponse(int Id, string Code, string Name, string? Description);
 public record UpdateRecipeBmiTypesRequest([Required, MaxLength(3)] List<int> BmiTypeIds);
 public record AdminRecipeBmiResponse(int PostId, string RecipeName, string Title, string Status, IReadOnlyCollection<BmiTypeResponse> BmiTypes, IReadOnlyCollection<int> CategoryIds);

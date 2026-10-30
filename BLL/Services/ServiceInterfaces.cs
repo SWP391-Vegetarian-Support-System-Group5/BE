@@ -31,6 +31,7 @@ public interface IUserAdministrationService
 {
     Task<IReadOnlyCollection<UserResponse>> GetUsersAsync(CancellationToken cancellationToken = default);
     Task<UserResponse> GetUserByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<AdminUserActivityResponse> GetActivityAsync(int id, CancellationToken cancellationToken = default);
     Task UpdateStatusAsync(int id, bool isActive, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 }

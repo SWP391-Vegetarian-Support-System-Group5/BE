@@ -58,6 +58,9 @@ static class BmiTests
         await Reject(() => recipes.GetAsync(held.PostId), 404, "public cannot read rejected draft");
         await recipes.UpdateAsync(held.PostId, 101, "USER", request with { Title = "Clean tofu", RecipeName = "Held tofu", BmiTypeIds = null });
         Check((await recipes.GetAsync(held.PostId)).Status == "PUBLISHED", "edited draft publishes only after fresh review");
+        var memberActivity = await new UserAdministrationService(new Repository<User>(db), db).GetActivityAsync(101);
+        Check(memberActivity.Posts == 1 && memberActivity.Recipes == 1 && memberActivity.Videos == 0 && memberActivity.DailyContributions.Sum() == 1,
+            "admin member activity reports real published content instead of generated figures");
         Check(recipe.BmiTypes!.Count == 2, "admin create stores multiple groups and returns them");
         var chinese = await db.RecipeCategories.SingleAsync(x => x.Slug == "chinese");
         await categories.UpdateRecipeMappingsAsync(recipe.PostId, [chinese.Id], default);
@@ -81,6 +84,10 @@ static class BmiTests
         var otherIngredients = await recipes.CreateAsync(100, request with { RecipeName = "Spinach dish", Ingredients = [new("Spinach", "100g", "PLANT", null)], BmiTypeIds = [normal.BMITypeId] });
         var ranked = await planner.GenerateAsync(101, new(null, "đậu hũ"));
         Check(ranked.Meals.First().RecipeId == recipe.PostId, "matching ingredients rank above other eligible recipes");
+        var unmatched = await planner.GenerateAsync(101, new(null, "dragonfruit"));
+        Check(unmatched.Meals.Count == 21 && unmatched.Meals.All(x => x.RecipeId == recipe.PostId || x.RecipeId == otherIngredients.PostId), "no pantry match falls back to safe BMI and vegan recipes");
+        var unmatchedReplacement = await planner.ReplaceMealAsync(unmatched.MealPlanId, unmatched.Meals.First().MealPlanMealId, 101);
+        Check(unmatchedReplacement.Meals.First().RecipeId != unmatched.Meals.First().RecipeId, "no pantry match can replace with another safe recipe");
         var replaced = await planner.ReplaceMealAsync(ranked.MealPlanId, ranked.Meals.First().MealPlanMealId, 101);
         Check(replaced.Meals.First().RecipeId == otherIngredients.PostId, "replacement can reuse a safe recipe elsewhere in the week");
         var milk = new Allergen { Name = "Milk" };

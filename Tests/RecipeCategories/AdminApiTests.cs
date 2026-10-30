@@ -42,8 +42,13 @@ static class AdminApiTests
         builder.Services.RemoveAll<IVideoRecipeDraftService>();
         builder.Services.AddMemoryCache();
         builder.Services.AddSingleton<ICommunityEventPublisher, TestEvents>();
+        builder.Services.AddSingleton<IModerationAiService, MockModerationAiService>();
+        builder.Services.AddSingleton<IAllergenNameValidator, TestAllergenValidator>();
+        builder.Services.AddSingleton<IAllergenIngredientMatcher, TestAllergenMatcher>();
+        builder.Services.AddSingleton<INotificationEventPublisher, TestNotificationPublisher>();
         builder.Services.AddSingleton<IEmailSender, NoEmail>();
         builder.Services.AddSingleton<IOpenStreetMapService, TestMap>();
+        builder.Services.AddSingleton<IImageStorage, TestImageStorage>();
         builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
         builder.Services.AddControllers().AddApplicationPart(typeof(AdministrationController).Assembly);
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -86,10 +91,33 @@ static class AdminApiTests
                 Console.WriteLine($"PASS {expected} {method} {path}");
                 return text.Length > 0 ? JsonDocument.Parse(text).RootElement.Clone() : default;
             }
+            async Task<JsonElement> SendImage(string purpose, int expected, string? token, byte[]? content = null)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/media/images?purpose={purpose}");
+                if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var form = new MultipartFormDataContent();
+                form.Add(new ByteArrayContent(content ?? [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]), "image", "dish.png");
+                request.Content = form;
+                using var response = await client.SendAsync(request);
+                var body = await response.Content.ReadAsStringAsync();
+                if ((int)response.StatusCode != expected) throw new Exception($"FAIL image {purpose}: expected {expected}, got {(int)response.StatusCode}: {body}");
+                checks++;
+                return body.Length > 0 ? JsonDocument.Parse(body).RootElement.Clone() : default;
+            }
             var adminLogin = await Send("POST", "/api/auth/login", 200, new { email = "user1@example.invalid", password = "Test@123" });
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
+            await SendImage("recipes", 401, null);
+            await SendImage("restaurants", 403, user);
+            await SendImage("categories", 403, user);
+            var userImage = await SendImage("recipes", 200, user);
+            if (!userImage.GetProperty("imageUrl").GetString()!.Contains("/recipes/")) throw new Exception("Recipe upload did not use Cloudinary recipe folder");
+            var restaurantImage = await SendImage("restaurants", 200, admin);
+            if (!restaurantImage.GetProperty("imageUrl").GetString()!.Contains("/restaurants/")) throw new Exception("Restaurant upload did not use Cloudinary restaurant folder");
+            await SendImage("categories", 200, admin);
+            await SendImage("recipes", 400, user, [0x01, 0x02, 0x03]);
+            await SendImage("unknown", 400, admin);
             var adminRoutes = new (string Method, string Path, object? Body)[] {
                 ("GET","/api/admin/users",null), ("GET","/api/admin/users/3",null), ("PUT","/api/admin/users/3/status",new { isActive = false }), ("DELETE","/api/admin/users/3",null),
                 ("GET","/api/admin/posts",null), ("DELETE","/api/admin/posts/1",null), ("GET","/api/admin/comments",null), ("DELETE","/api/admin/comments/1",null),
@@ -133,9 +161,10 @@ static class AdminApiTests
             var diets = await Send("GET", "/api/diet-types", 200, token: admin);
             var dietId = diets.EnumerateArray().First(x => x.GetProperty("name").GetString() == "VEGAN").GetProperty("id").GetInt32();
             var secondDietId = diets.EnumerateArray().First(x => x.GetProperty("name").GetString() == "LACTO_VEGETARIAN").GetProperty("id").GetInt32();
-            var restaurantBody = new { name="Test kitchen",address="Test address",latitude=1.0,longitude=2.0,dietTypeIds=new[]{dietId,secondDietId,secondDietId},foods=new[]{"Tofu","Tofu","Rice"} };
+            var restaurantBody = new { name="Test kitchen",address="Test address",imageUrl="https://res.cloudinary.com/test/image/upload/v1/restaurant.jpg",latitude=1.0,longitude=2.0,dietTypeIds=new[]{dietId,secondDietId,secondDietId},foods=new[]{"Tofu","Tofu","Rice"} };
             var restaurant = await Send("POST", "/api/admin/restaurants", 201, restaurantBody, admin);
             var restaurantId = restaurant.GetProperty("restaurantId").GetInt32();
+            if (restaurant.GetProperty("imageUrl").GetString() != restaurantBody.imageUrl) throw new Exception("Restaurant image URL was not saved");
             if (restaurant.GetProperty("latitude").GetDecimal() != 10m || restaurant.GetProperty("longitude").GetDecimal() != 106m) throw new Exception("Restaurant coordinates must come from its address, not the client");
             if (restaurant.GetProperty("foods").GetArrayLength()!=2) throw new Exception("Restaurant foods were not deduplicated");
             if (restaurant.GetProperty("dietTypeIds").GetArrayLength()!=2) throw new Exception("Restaurant diet types were not deduplicated");
@@ -155,8 +184,9 @@ static class AdminApiTests
                 await db.SaveChangesAsync();
                 mushroomId = mushroom.IngredientId;
             }
-            await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 204, new {name="Changed kitchen",address="Changed address",dietTypeIds=new[]{dietId},foods=new[]{"Soup"},ingredientIds=new[]{mushroomId}}, admin);
+            await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 204, new {name="Changed kitchen",address="Changed address",imageUrl="https://res.cloudinary.com/test/image/upload/v1/changed.jpg",dietTypeIds=new[]{dietId},foods=new[]{"Soup"},ingredientIds=new[]{mushroomId}}, admin);
             var updatedRestaurant = await Send("GET", $"/api/restaurants/{restaurantId}", 200, token: admin);
+            if (updatedRestaurant.GetProperty("imageUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/changed.jpg") throw new Exception("Restaurant image URL was not updated");
             if (updatedRestaurant.GetProperty("foods")[0].GetString() != "Soup") throw new Exception("Restaurant update did not replace foods");
             if (updatedRestaurant.GetProperty("latitude").GetDecimal() != 11m) throw new Exception("Changing restaurant address must refresh coordinates");
             if (updatedRestaurant.GetProperty("ingredientIds")[0].GetInt32() != mushroomId) throw new Exception("Restaurant ingredients were not saved");
@@ -170,6 +200,8 @@ static class AdminApiTests
             await Send("POST", "/api/admin/restaurants", 422, new {name="Unknown",address="Unknown address"}, admin);
             await Send("POST", "/api/admin/restaurants", 404, new {name="Bad",address="Test address",dietTypeIds=new[]{9999}}, admin);
             await Send("POST", "/api/admin/restaurants", 400, new {name="No diet",address="Test address",dietTypeIds=Array.Empty<int>()}, admin);
+            await Send("POST", "/api/admin/restaurants", 400, new {name="Bad image",address="Test address",dietTypeIds=new[]{dietId},imageUrl="javascript:alert(1)"}, admin);
+            await Send("POST", "/api/admin/restaurants", 400, new {name="External image",address="Test address",dietTypeIds=new[]{dietId},imageUrl="https://example.com/photo.jpg"}, admin);
             await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 404, new {name="Changed kitchen",address="Changed address",dietTypeIds=new[]{9999}}, admin);
             await Send("GET", "/api/restaurants?food=Soup", 200, token: admin);
             await Send("DELETE", $"/api/admin/restaurants/{restaurantId}", 204, token: admin);
@@ -179,6 +211,7 @@ static class AdminApiTests
             var categoryId = category.GetProperty("id").GetInt32();
             await Send("POST", "/api/recipe-categories", 409, new {name="Duplicate",slug="test-category",type="CUISINE"}, admin);
             await Send("POST", "/api/recipe-categories", 400, new {name="Invalid",slug="bad",type="NOT_A_TYPE"}, admin);
+            await Send("POST", "/api/recipe-categories", 400, new {name="External image",slug="external-image",type="CUISINE",imageUrl="https://example.com/photo.jpg"}, admin);
             await Send("PUT", $"/api/recipe-categories/{categoryId}", 200, new {name="Changed category",slug="test-category",type="CUISINE",isActive=false}, admin);
             var visible = await Send("GET", "/api/recipe-categories?type=CUISINE", 200);
             if (visible.EnumerateArray().Any(x=>x.GetProperty("id").GetInt32()==categoryId)) throw new Exception("Inactive category leaked to public");
@@ -207,7 +240,7 @@ static class AdminApiTests
             await Send("POST", $"/api/admin/moderation/{commentReport.GetProperty("flagId").GetInt32()}/remove", 204, token: admin);
             var comments = await Send("GET", "/api/admin/comments", 200, token: admin);
             if (comments[0].GetProperty("status").GetString() != "REMOVED") throw new Exception("Moderation did not remove comment");
-            await Send("POST", $"/api/admin/moderation/{reportId}/remove", 204, token: admin);
+            await Send("POST", $"/api/admin/moderation/{reportId}/remove", 409, token: admin);
             await Send("DELETE", $"/api/admin/comments/{commentId}", 204, token: admin);
             await Send("DELETE", $"/api/admin/posts/{postId}", 204, token: admin);
             await Send("GET", $"/api/posts/{postId}", 404);
@@ -227,9 +260,12 @@ static class AdminApiTests
             await Send("PUT", $"/api/admin/ingredient-categories/{plantId}", 400, new {code="PLANT",name="Plants",dietaryGroup="DAIRY"}, admin);
             var bmiTypes = await Send("GET", "/api/bmi-types", 200);
             var bmiId = bmiTypes[0].GetProperty("id").GetInt32();
-            var recipe = await Send("POST", "/api/recipes", 201, new { title="Recipe post",content="Test",recipeName="Tofu dish",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}},steps=new[]{new{stepNumber=1,instruction="Cook"}},bmiTypeIds=new[]{bmiId} }, admin);
+            var recipe = await Send("POST", "/api/recipes", 201, new { title="Recipe post",content="Test",recipeName="Tofu dish",imageUrl="https://res.cloudinary.com/test/image/upload/v1/tofu.jpg",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}},steps=new[]{new{stepNumber=1,instruction="Cook"}},bmiTypeIds=new[]{bmiId} }, admin);
             var recipeId = recipe.GetProperty("postId").GetInt32();
+            if (recipe.GetProperty("imageUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image URL was not saved");
+            await Send("POST", "/api/recipes", 400, new { title="Bad image",content="Test",recipeName="Tofu dish",imageUrl="http://example.com/tofu.jpg",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}} }, admin);
             var recipePost = await Send("GET", $"/api/posts/{recipeId}", 200);
+            if (recipePost.GetProperty("thumbnailUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image was not shown on the post");
             if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
             var chineseId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "chinese").GetProperty("id").GetInt32();
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{chineseId} }, admin);
@@ -261,6 +297,29 @@ static class AdminApiTests
     sealed class NoEmail : IEmailSender
     {
         public Task SendOtpAsync(string recipientEmail, string purpose, string otpCode, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Email is not part of admin API tests.");
+    }
+
+    sealed class TestAllergenValidator : IAllergenNameValidator
+    {
+        public Task<ValidatedAllergenName> ValidateAsync(string input, IReadOnlyCollection<Allergen> existing, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ValidatedAllergenName(input));
+    }
+
+    sealed class TestAllergenMatcher : IAllergenIngredientMatcher
+    {
+        public Task<IReadOnlySet<int>> FindUnsafeAsync(IReadOnlyCollection<Allergen> allergens, IReadOnlyCollection<Ingredient> ingredients, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlySet<int>>(new HashSet<int>());
+    }
+
+    sealed class TestNotificationPublisher : INotificationEventPublisher
+    {
+        public Task SendAsync(int userId, UserNotificationResponse notification, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    sealed class TestImageStorage : IImageStorage
+    {
+        public Task<string> UploadAsync(Stream image, string extension, string purpose, CancellationToken ct) =>
+            Task.FromResult($"https://res.cloudinary.com/test/image/upload/v1/{purpose}/mock{extension}");
     }
 
     sealed class TestMap : IOpenStreetMapService
