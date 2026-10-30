@@ -105,6 +105,24 @@ internal static class RecipeCatalogSeed
         if (counts.Count != 10 || counts.Any(item => item.Count != 10)) throw new InvalidOperationException("Expected exactly 10 recipes in every category.");
         if (await db.Recipes.CountAsync() != 100 || await db.RecipeIngredients.CountAsync() == 0 || await db.RecipeSteps.CountAsync() != 300)
             throw new InvalidOperationException("Recipe catalog record verification failed.");
+        var recipes = await db.Recipes
+            .Include(recipe => recipe.Ingredients).ThenInclude(link => link.Ingredient).ThenInclude(ingredient => ingredient.Category)
+            .Include(recipe => recipe.DietCompatibilities).ThenInclude(mapping => mapping.DietType)
+            .ToListAsync();
+        foreach (var recipe in recipes)
+        {
+            var expected = VegetarianDietRules.GetCompatibleDietTypes(recipe.Ingredients.Select(link => link.Ingredient.Category.DietaryGroup))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            var actual = recipe.DietCompatibilities
+                .Where(mapping => mapping.IsCompatible)
+                .Select(mapping => mapping.DietType.Name)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            if (!expected.SequenceEqual(actual, StringComparer.Ordinal))
+                throw new InvalidOperationException($"Diet compatibility mismatch for recipe {recipe.PostId}.");
+        }
+        Console.WriteLine("Diet compatibility verification passed.");
         Console.WriteLine("Catalog verification passed.");
     }
 
