@@ -14,7 +14,7 @@ public static class RecipeCategorySchemaUpdate
               `Description` varchar(1000) NULL, `ImageUrl` varchar(1000) NULL,
               `IsActive` tinyint(1) NOT NULL DEFAULT 1, `CreatedAt` datetime(6) NOT NULL,
               PRIMARY KEY (`Id`), UNIQUE KEY `UX_RecipeCategories_Type_Slug` (`Type`,`Slug`),
-              CONSTRAINT `CK_RecipeCategories_Type` CHECK (`Type` IN ('MEAL_TYPE','CUISINE','DISH_TYPE','LIFESTYLE','DIETARY_TYPE'))
+              CONSTRAINT `CK_RecipeCategories_Type` CHECK (`Type` IN ('MEAL_TYPE','CUISINE','DISH_TYPE','LIFESTYLE'))
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """, ct);
         await db.Database.ExecuteSqlRawAsync("""

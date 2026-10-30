@@ -113,7 +113,6 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
-    public decimal? CaloriesPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public string? ImageUrl { get; set; }
     public Post Post { get; set; } = null!;

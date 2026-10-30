@@ -11,7 +11,7 @@
 - MealPlans: removed BMR, TDEE, HealthGoal, TargetCaloriesPerDay from the model.
 - MealPlanMeals: removed PlannedCalories from the model.
 - VideoRecipeDrafts: removed Servings/CaloriesPerServing from model and DTOs.
-- Recipes.Servings/CaloriesPerServing and UserProfiles.HealthGoal are retained.
+- Recipes.Servings is retained; Recipes.CaloriesPerServing and UserProfiles.HealthGoal are removed.
 
 ## Deploy order
 

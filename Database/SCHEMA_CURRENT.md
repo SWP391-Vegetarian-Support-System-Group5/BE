@@ -17,7 +17,7 @@
 - **Comments (17):** `CommentId` PK; `PostId` bài; `UserId` người viết; `ParentCommentId` bình luận cha; `Content` nội dung; `Status` trạng thái; `CreatedAt`, `UpdatedAt` thời điểm.
 - **PostRatings (11):** `PostId`, `UserId` PK ghép xác định người chấm bài; `Rating` số điểm.
 - **Bookmarks (5):** `UserId`, `PostId` PK ghép xác định người lưu bài.
-- **Recipes (67):** `PostId` PK/FK Posts; `PrepMinutes`, `CookMinutes` thời gian; `Servings` số phần; `VideoUrl` URL video; `ImageUrl` ảnh món ăn; `CaloriesPerServing` calo/phần (API còn hỗ trợ, meal planner không dùng); `RecipeName` tên món.
+- **Recipes:** `PostId` PK/FK Posts; `PrepMinutes`, `CookMinutes` thời gian; `Servings` số phần; `VideoUrl` URL video; `ImageUrl` ảnh món ăn; `RecipeName` tên món.
 - **RecipeSteps (230):** `RecipeStepId` PK; `RecipeId` FK món; `StepNumber` thứ tự; `Instruction` hướng dẫn.
 - **IngredientCategories (5):** `IngredientCategoryId` PK; `Code` mã nhóm; `Name` tên; `DietaryGroup` quy tắc PLANT/DAIRY/EGG/HONEY/UNVERIFIED.
 - **Ingredients (152):** `IngredientId` PK; `Name` tên dùng chung; `IngredientCategoryId` FK nhóm; `AllergenId` FK dị ứng chuẩn, có thể null.
@@ -50,7 +50,7 @@
 ## Đánh giá cột/bảng có thể dư
 
 - **Đã xóa trên Aiven ngày 29/10/2026:** `Restaurants.DietTypeId`; `Posts.ImageUrl`, `Posts.ImagePublicId`; 7 cột ảnh cũ của `MealPlanMeals`; `UserProfiles.AvatarUrl`, `UserProfiles.AvatarPublicId`; bảng `UserNotifications`. Việc xóa này cũng loại bỏ 3 thông báo cũ, 1 ảnh đại diện cũ và 2 trạng thái tạo ảnh cũ vốn không được hệ thống hiện tại sử dụng.
-- **Đang dùng:** `Recipes.Servings` hiển thị ở chi tiết món; `Recipes.CaloriesPerServing` còn nhận/trả qua API và 50 món có giá trị nhưng meal planner không tính calo; `RecipeDietCompatibility.IsCompatible` được lọc; `__EFMigrationsHistory` cần cho migration.
+- **Đang dùng:** `Recipes.Servings` hiển thị ở chi tiết món; `RecipeDietCompatibility.IsCompatible` được lọc; `__EFMigrationsHistory` cần cho migration.
 - **Khoảng trống dữ liệu:** 6 công thức đã đăng chưa gán BMI; 2 công thức chưa có diet type tương thích; 1 hồ sơ thiếu diet type; 1 hồ sơ thiếu chiều cao/cân nặng; 18/42 video draft đang FAILED. Các số này không tự chứng minh lỗi ở phiên bản code mới, nhưng giải thích vì sao một số luồng không có kết quả.
 
 ## Chức năng hệ thống và kiểm thử

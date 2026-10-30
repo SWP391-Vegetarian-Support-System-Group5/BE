@@ -539,7 +539,7 @@ public sealed class VideoRecipeDraftService(
             draft.UpdatedAt = VietnamTime.Now;
             await drafts.SaveChangesAsync(ct);
         }
-        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, request.BmiTypeIds);
+        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, request.BmiTypeIds);
         RecipeResponse recipe;
         if (draft.RecipePostId.HasValue)
         {
