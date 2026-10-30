@@ -106,7 +106,7 @@ public interface IPostService
 
 public interface IRecipeService
 {
-    Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default);
+    Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default, string? role = null);
     Task<RecipeResponse> GetAsync(int id, CancellationToken cancellationToken = default, int? actorId = null, string? role = null);
     Task UpdateAsync(int id, int actorId, string role, CreateRecipeRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);

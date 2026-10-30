@@ -23,13 +23,15 @@ public class RecipeService(
     RecipeBmiService recipeBmi,
     IUserNotificationService? notifications = null) : IRecipeService
 {
-    public async Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default)
+    public async Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default, string? role = null)
     {
         ValidateRecipeRequest(request);
         var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         await recipeBmi.ValidateAsync(request.BmiTypeIds, userId, cancellationToken);
         await ValidateRelationsAsync(request, cancellationToken);
-        var moderationReason = await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        // Administrators are the editorial authority: their create/edit actions publish directly.
+        // Member-submitted recipes still go through AI moderation below.
+        var moderationReason = role == "ADMIN" ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
@@ -65,7 +67,8 @@ public class RecipeService(
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
         await recipeBmi.ValidateAsync(request.BmiTypeIds, actorId, cancellationToken);
         await ValidateRelationsAsync(request, cancellationToken);
-        var moderationReason = await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        // An administrator may correct content directly without routing their work back to AI review.
+        var moderationReason = role == "ADMIN" ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
         var wasPublished = recipe.Post.Status == "PUBLISHED";
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();

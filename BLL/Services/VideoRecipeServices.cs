@@ -540,7 +540,7 @@ public sealed class VideoRecipeDraftService(
         }
         else
         {
-            recipe = await recipes.CreateAsync(draft.UserId, recipeRequest, ct);
+            recipe = await recipes.CreateAsync(draft.UserId, recipeRequest, ct, role);
             draft.RecipePostId = recipe.PostId;
         }
         draft.Status = recipe.Status == "PUBLISHED" ? "PUBLISHED" : "READY";
