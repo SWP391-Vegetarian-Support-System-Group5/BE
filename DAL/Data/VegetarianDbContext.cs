@@ -227,7 +227,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.PostId);
             entity.Property(x => x.RecipeName).HasMaxLength(250).IsRequired();
             entity.Property(x => x.Servings).HasPrecision(5, 2);
-            entity.Property(x => x.CaloriesPerServing).HasPrecision(8, 2);
             entity.Property(x => x.VideoUrl).HasMaxLength(1000).IsUnicode(false);
             entity.Property(x => x.ImageUrl).HasMaxLength(1000).IsUnicode(false);
             entity.HasOne(x => x.Post).WithOne(x => x.Recipe).HasForeignKey<Recipe>(x => x.PostId).OnDelete(DeleteBehavior.NoAction);

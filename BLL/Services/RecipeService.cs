@@ -36,7 +36,7 @@ public class RecipeService(
         var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
-        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl, ImageUrl = imageUrl };
+        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, VideoUrl = videoUrl, ImageUrl = imageUrl };
         await recipes.AddAsync(recipe, cancellationToken);
         await ReplaceDetailsAsync(recipe.PostId, request, cancellationToken);
         await recipeBmi.SetMappingsAsync(recipe.PostId, request.BmiTypeIds, cancellationToken);
@@ -75,7 +75,7 @@ public class RecipeService(
         foreach (var flag in pendingFlags) flag.Status = "APPROVED";
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
         recipe.RecipeName = request.RecipeName.Trim();
-        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
+        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
         foreach (var item in recipe.Ingredients) ingredients.Remove(item);
         foreach (var item in recipe.Steps) steps.Remove(item);
         foreach (var item in recipe.DietCompatibilities) dietCompatibilities.Remove(item);
@@ -133,7 +133,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.CaloriesPerServing, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), x.BMITypes.Select(m => new BmiTypeResponse(m.BMITypeId, m.BMIType.Code, m.BMIType.Name, m.BMIType.Description)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl);
+    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), x.BMITypes.Select(m => new BmiTypeResponse(m.BMITypeId, m.BMIType.Code, m.BMIType.Name, m.BMIType.Description)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl);
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,
@@ -157,7 +157,6 @@ public class RecipeService(
         if (string.IsNullOrWhiteSpace(request.RecipeName) || request.RecipeName.Trim().Length > 250) throw new ServiceException("Recipe name is required and must not exceed 250 characters.");
         if ((request.Steps ?? []).GroupBy(x => x.StepNumber).Any(g => g.Count() > 1)) throw new ServiceException("Recipe step numbers must be unique.");
         if (request.Servings is <= 0) throw new ServiceException("Servings must be greater than zero.");
-        if (request.CaloriesPerServing is <= 0) throw new ServiceException("Calories per serving must be greater than zero.");
         if (request.Ingredients is not { Count: > 0 }) throw new ServiceException("A recipe must include at least one classified ingredient.");
     }
     private static void EnsureOwner(int ownerId, int actorId, string role) { if (ownerId != actorId && role != "ADMIN") throw new ServiceException("You do not have permission to modify this recipe.", 403); }

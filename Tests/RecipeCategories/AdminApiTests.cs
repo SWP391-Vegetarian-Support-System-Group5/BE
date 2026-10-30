@@ -267,10 +267,12 @@ static class AdminApiTests
             var recipePost = await Send("GET", $"/api/posts/{recipeId}", 200);
             if (recipePost.GetProperty("thumbnailUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image was not shown on the post");
             if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
-            var chineseId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "chinese").GetProperty("id").GetInt32();
-            await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{chineseId} }, admin);
+            var grainsId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "mon-tu-ngu-coc").GetProperty("id").GetInt32();
+            await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{grainsId} }, admin);
             var mappedRecipes = await Send("GET", "/api/admin/recipes/bmi-types", 200, token: admin);
-            if (!mappedRecipes.EnumerateArray().Single(x => x.GetProperty("postId").GetInt32() == recipeId).GetProperty("categoryIds").EnumerateArray().Any(x => x.GetInt32() == chineseId)) throw new Exception("Recipe category assignment did not persist");
+            if (!mappedRecipes.EnumerateArray().Single(x => x.GetProperty("postId").GetInt32() == recipeId).GetProperty("categoryIds").EnumerateArray().Any(x => x.GetInt32() == grainsId)) throw new Exception("Recipe category assignment did not persist");
+            var categoryPosts = await Send("GET", $"/api/posts?category={grainsId}", 200);
+            if (!categoryPosts.EnumerateArray().Any(x => x.GetProperty("postId").GetInt32() == recipeId)) throw new Exception("Public recipe category page cannot list the assigned post");
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=Array.Empty<int>() }, admin);
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 400, new { categoryIds=new[]{9999} }, admin);
             var ingredients = await Send("GET", "/api/ingredients?keyword=Test tofu", 200, token: admin);

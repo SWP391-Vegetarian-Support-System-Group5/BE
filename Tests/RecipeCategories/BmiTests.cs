@@ -48,9 +48,9 @@ static class BmiTests
         var categories = new RecipeCategoryService(db);
         await categories.SeedAsync(default);
         var bmi = new RecipeBmiService(db, events);
-        var catalog = new IngredientCatalogService(db, categories, events);
+        var catalog = new IngredientCatalogService(db, events);
         var recipes = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), new Repository<ModerationFlag>(db), new MockModerationAiService(), events, categories, catalog, db, bmi);
-        var request = new CreateRecipeRequest("Post title", "Content", null, 10, 10, 2, null,
+        var request = new CreateRecipeRequest("Post title", "Content", null, 10, 10, 2,
             [new("Tofu", "100g", "PLANT", null)], [new(1, "Cook")], "Tofu dish", [], [normal.BMITypeId, under.BMITypeId]);
         var recipe = await recipes.CreateAsync(100, request);
         var held = await recipes.CreateAsync(101, request with { Title = "spam", RecipeName = "Held tofu", BmiTypeIds = null });
@@ -62,11 +62,11 @@ static class BmiTests
         Check(memberActivity.Posts == 1 && memberActivity.Recipes == 1 && memberActivity.Videos == 0 && memberActivity.DailyContributions.Sum() == 1,
             "admin member activity reports real published content instead of generated figures");
         Check(recipe.BmiTypes!.Count == 2, "admin create stores multiple groups and returns them");
-        var chinese = await db.RecipeCategories.SingleAsync(x => x.Slug == "chinese");
-        await categories.UpdateRecipeMappingsAsync(recipe.PostId, [chinese.Id], default);
-        Check((await bmi.RecipesAsync(default)).Single(x => x.PostId == recipe.PostId).CategoryIds.Contains(chinese.Id), "admin recipe list exposes assigned category");
+        var grains = await db.RecipeCategories.SingleAsync(x => x.Slug == "mon-tu-ngu-coc");
+        await categories.UpdateRecipeMappingsAsync(recipe.PostId, [grains.Id], default);
+        Check((await bmi.RecipesAsync(default)).Single(x => x.PostId == recipe.PostId).CategoryIds.Contains(grains.Id), "admin recipe list exposes assigned category");
         await categories.UpdateRecipeMappingsAsync(recipe.PostId, [], default);
-        Check(!(await bmi.RecipesAsync(default)).Single(x => x.PostId == recipe.PostId).CategoryIds.Contains(chinese.Id), "removing category updates the recipe mapping");
+        Check(!(await bmi.RecipesAsync(default)).Single(x => x.PostId == recipe.PostId).CategoryIds.Contains(grains.Id), "removing category updates the recipe mapping");
         await bmi.UpdateAsync(recipe.PostId, [normal.BMITypeId, normal.BMITypeId], 100, default);
         Check(await db.RecipeBMITypes.CountAsync(x => x.RecipeId == recipe.PostId) == 1, "deduplicate and remove previous assignments");
         await Reject(() => bmi.UpdateAsync(recipe.PostId, [obese.BMITypeId], 101, default), 403, "user cannot assign BMI groups");

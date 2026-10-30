@@ -14,6 +14,48 @@ if (args.Contains("--admin-api"))
     return;
 }
 
+if (args.Contains("--preview-reset-aiven"))
+{
+    await AivenResetPreview.RunAsync();
+    return;
+}
+
+if (args.Contains("--remove-dietary-recipe-categories"))
+{
+    await AivenResetPreview.RemoveDietaryCategoriesAsync();
+    return;
+}
+
+if (args.Contains("--seed-recipe-catalog-aiven"))
+{
+    await RecipeCatalogSeed.ApplyAivenAsync(args.FirstOrDefault(value => value.StartsWith("--confirm="))?.Split('=', 2)[1] ?? "");
+    return;
+}
+
+if (args.Contains("--verify-recipe-catalog-aiven"))
+{
+    await RecipeCatalogSeed.VerifyAivenAsync();
+    return;
+}
+
+if (args.Contains("--drop-recipe-calories-aiven"))
+{
+    await RecipeCaloriesSchemaUpdate.ApplyAivenAsync();
+    return;
+}
+
+if (args.Contains("--verify-recipe-calories-aiven"))
+{
+    await RecipeCaloriesSchemaUpdate.VerifyAivenAsync();
+    return;
+}
+
+if (args.Contains("--reset-aiven-keep-admin"))
+{
+    await AivenResetPreview.ResetAsync(args.FirstOrDefault(value => value.StartsWith("--confirm="))?.Split('=', 2)[1] ?? "");
+    return;
+}
+
 if (args.Contains("--video-analysis"))
 {
     await VideoAnalysisTests.RunAsync();
@@ -68,7 +110,7 @@ if (args.Contains("--inspect-aiven") || args.Contains("--apply-aiven"))
         var linksBefore = Convert.ToInt32(await command.ExecuteScalarAsync());
         await IngredientSchemaUpdate.ApplyAsync(liveDb);
         await IngredientSchemaUpdate.ApplyAsync(liveDb);
-        await new IngredientCatalogService(liveDb, new RecipeCategoryService(liveDb), new TestEvents()).RefreshCompatibilityAsync(default);
+        await new IngredientCatalogService(liveDb, new TestEvents()).RefreshCompatibilityAsync(default);
         await new RecipeCategoryService(liveDb).SeedAsync(default);
         if (await liveDb.Recipes.CountAsync() != recipesBefore || await liveDb.RecipeIngredients.CountAsync() != linksBefore)
             throw new Exception("Migration changed recipe or ingredient-link counts.");
@@ -94,30 +136,27 @@ Check(ImageUrlValidation.Normalize("https://res.cloudinary.com/demo/image/upload
 await Rejected(() => Task.Run(() => ImageUrlValidation.Normalize("https://example.com/photo.jpg")), "reject external image URL");
 await Rejected(() => Task.Run(() => ImageUrlValidation.Normalize("https://res.cloudinary.com/demo/video/upload/sample.mp4")), "reject Cloudinary video as image URL");
 RecipeCategoryRequest Request(RecipeCategory c, bool active = true) => new(c.Name, c.Slug, c.Type, c.Description, c.ImageUrl, active);
+db.RecipeCategories.Add(new RecipeCategory { Name = "Vegan", Slug = "vegan", Type = "DIETARY_TYPE", CreatedAt = DateTime.UtcNow });
+await db.SaveChangesAsync();
 await service.SeedAsync(default);
 await service.SeedAsync(default);
-Check(await db.RecipeCategories.CountAsync() == 35, "idempotent 35 category seed");
-Check((await service.ListAsync("CUISINE", false, default)).Count == 10, "type filter");
-Check(RecipeCategoryService.DietSlugs.Count == 4 && !RecipeCategoryService.DietSlugs.Values.Contains("PESCATARIAN"), "strict vegetarian categories");
-var vegan = await db.RecipeCategories.SingleAsync(c => c.Slug == "vegan");
-await Rejected(() => service.ValidateSelectionAsync([vegan.Id], ["PLANT", "DAIRY"], default), "reject dairy recipe labeled vegan");
-await Rejected(() => service.ValidateSelectionAsync([vegan.Id], [], default), "empty ingredients cannot receive dietary labels");
+Check(await db.RecipeCategories.CountAsync() == 10, "idempotent 10 menu categories");
+Check((await service.ListAsync("DISH_TYPE", false, default)).Count == 10, "dish category type filter");
+Check(!await db.RecipeCategories.AnyAsync(c => c.Type == "DIETARY_TYPE"), "dietary compatibility stays outside recipe categories");
 await Rejected(() => service.ValidateSelectionAsync([999], ["PLANT"], default), "reject unknown category");
-await Rejected(async () => { await service.SaveAsync(null, Request(vegan), default); }, "reject duplicate slug/type");
-await Rejected(async () => { await service.SaveAsync(null, new("Pescatarian", "pescatarian", "DIETARY_TYPE", null, null), default); }, "reject pescatarian");
+await Rejected(async () => { await service.SaveAsync(null, new("Vegan", "vegan", "DIETARY_TYPE", null, null), default); }, "reject dietary type in recipe categories");
 var dairyCategory = new IngredientCategory { Code = "DAIRY", Name = "Dairy", DietaryGroup = "DAIRY" };
 db.IngredientCategories.Add(dairyCategory);
 db.IngredientCategories.Add(new IngredientCategory { Code = "PLANT", Name = "Plant", DietaryGroup = "PLANT" });
 db.Recipes.Add(new Recipe { PostId = 500, RecipeName = "Soup", Ingredients = [new RecipeIngredient { Ingredient = new Ingredient { Name = "Milk", Category = dairyCategory } }] });
 await db.SaveChangesAsync();
-var soup = await db.RecipeCategories.SingleAsync(c => c.Slug == "soup");
+var soup = await db.RecipeCategories.SingleAsync(c => c.Slug == "sup-mon-ham");
 await service.SetMappingsAsync(500, [soup.Id, soup.Id], ["DAIRY"], default);
 await db.SaveChangesAsync();
-Check(await db.RecipeCategoryMappings.CountAsync(m => m.RecipeId == 500) == 3, "one dish has soup + lacto + lacto-ovo, no vegan");
-Check(!await db.RecipeCategoryMappings.AnyAsync(m => m.RecipeId == 500 && m.CategoryId == vegan.Id), "no vegan dairy mapping");
+Check(await db.RecipeCategoryMappings.CountAsync(m => m.RecipeId == 500) == 1, "one dish has one selected category");
 await service.SetMappingsAsync(500, [soup.Id], ["PLANT"], default);
 await db.SaveChangesAsync();
-Check(await db.RecipeCategoryMappings.CountAsync(m => m.RecipeId == 500) == 5, "mapping replacement and all four plant dietary labels");
+Check(await db.RecipeCategoryMappings.CountAsync(m => m.RecipeId == 500) == 1, "category mapping remains independent of ingredient diet group");
 await service.SaveAsync(soup.Id, Request(soup, false), default);
 Check(!(await service.ListAsync(null, false, default)).Any(c => c.Id == soup.Id), "public excludes inactive");
 Check((await service.ListAsync(null, true, default)).Any(c => c.Id == soup.Id), "admin can see inactive");
@@ -130,19 +169,19 @@ foreach (var name in new[] { "VEGAN", "VEGETARIAN", "LACTO_VEGETARIAN", "OVO_VEG
 db.Users.Add(new User { UserId = 1, Email = "test@example.invalid", PasswordHash = "unused", Role = "USER", Profile = new UserProfile { FullName = "Test" } });
 await db.SaveChangesAsync();
 var events = new TestEvents();
-var ingredientCatalog = new IngredientCatalogService(db, service, events);
+var ingredientCatalog = new IngredientCatalogService(db, events);
 var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), new Repository<ModerationFlag>(db), new MockModerationAiService(), events, service, ingredientCatalog, db, new RecipeBmiService(db, events));
-var dinner = await db.RecipeCategories.SingleAsync(c => c.Slug == "dinner");
-var request = new CreateRecipeRequest("Test post", "Test content", null, 10, 10, 2, null,
+var dinner = await db.RecipeCategories.SingleAsync(c => c.Slug == "mon-an-sang");
+var request = new CreateRecipeRequest("Test post", "Test content", null, 10, 10, 2,
     [new("Rice", "100g", "PLANT", null)], [new(1, "Cook rice")], "Rice bowl", [dinner.Id], ImageUrl: "https://res.cloudinary.com/test/image/upload/v1/rice.jpg");
 var created = await recipeService.CreateAsync(1, request);
 Check(created.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/rice.jpg" && created.ThumbnailUrl == created.ImageUrl, "recipe image stored and used as thumbnail");
-Check(created.Categories.Count == 5, "create recipe persists selected + derived categories");
-Check((await recipeService.SearchAsync(null, dinner.Id, "MEAL_TYPE")).Any(r => r.PostId == created.PostId), "recipe search category + type");
+Check(created.Categories.Count == 1, "create recipe persists selected category");
+Check((await recipeService.SearchAsync(null, dinner.Id, "DISH_TYPE")).Any(r => r.PostId == created.PostId), "recipe search category + type");
 await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Cheese", "50g", "DAIRY", null)], CategoryIds = [], ImageUrl = "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" });
 var updated = await recipeService.GetAsync(created.PostId);
 Check(updated.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" && updated.ThumbnailUrl == updated.ImageUrl, "recipe image updated");
-Check(updated.Categories.Count == 2 && updated.Categories.All(c => c.Slug != "vegan"), "editing dairy recalculates labels and removes old selection");
+Check(updated.Categories.Count == 0, "editing recipe removes unselected category");
 Check(events.Items.SequenceEqual(["postCreated", "postUpdated"]), "recipe mutations publish realtime events");
 await ingredientCatalog.ResolveAsync([new("Rice", "200g", "PLANT", null)], default);
 Check(await db.Ingredients.CountAsync(x => x.Name == "Rice") == 1, "shared ingredient reused across recipes");
@@ -153,7 +192,7 @@ var cheese = await db.Ingredients.SingleAsync(x => x.Name == "Cheese");
 var plant = await db.IngredientCategories.SingleAsync(x => x.Code == "PLANT");
 await ingredientCatalog.UpdateAsync(cheese.IngredientId, new("Plant cheese", plant.IngredientCategoryId, null), default);
 var reclassified = await recipeService.GetAsync(created.PostId);
-Check(reclassified.Ingredients.Single().IngredientName == "Plant cheese" && reclassified.Categories.Any(x => x.Slug == "vegan"), "shared ingredient edit refreshes recipe name and dietary labels");
+Check(reclassified.Ingredients.Single().IngredientName == "Plant cheese" && reclassified.Categories.Count == 0, "shared ingredient edit leaves recipe categories unchanged");
 var veganDietId = await db.DietTypes.Where(x => x.Name == "VEGAN").Select(x => x.DietTypeId).SingleAsync();
 Check(reclassified.CompatibleDietTypeIds.Contains(veganDietId), "shared category edit refreshes planner compatibility");
 Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared ingredient edit publishes recipe refresh event");

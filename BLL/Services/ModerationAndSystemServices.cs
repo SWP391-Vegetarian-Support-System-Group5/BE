@@ -61,13 +61,13 @@ public class SeedService(
     {
         await AddMissingAsync(dietTypes, ["VEGAN", "VEGETARIAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN"], name => new DietType { Name = name }, x => x.Name, cancellationToken);
         await AddMissingAsync(allergens, ["Peanut", "Milk", "Egg", "Soy", "Gluten", "Tree Nut"], name => new Allergen { Name = name }, x => x.Name, cancellationToken);
-        if (!await users.Query().AnyAsync(x => x.Email == "admin@vegetarian.local", cancellationToken))
+        if (!await users.Query().AnyAsync(x => x.Role == "ADMIN", cancellationToken))
         {
             var now = DateTime.UtcNow;
             await users.AddAsync(new User { Email = "admin@vegetarian.local", PasswordHash = PasswordHasher.Hash("Admin@123"), Role = "ADMIN", Profile = new UserProfile { FullName = "System Administrator" }, CreatedAt = now, UpdatedAt = now, IsActive = true, IsEmailVerified = true }, cancellationToken);
             await users.SaveChangesAsync(cancellationToken);
         }
-        await SeedRecipeCatalogAsync(cancellationToken);
+        // Recipe content is created by users and admins; restarting the API must not recreate sample posts.
         await ingredientCatalog.RefreshCompatibilityAsync(cancellationToken);
         await recipeCategories.SeedAsync(cancellationToken);
     }
@@ -113,7 +113,6 @@ public class SeedService(
                 PrepMinutes = seed.PrepMinutes,
                 CookMinutes = seed.CookMinutes,
                 Servings = seed.Servings,
-                CaloriesPerServing = seed.CaloriesPerServing
             };
             await recipes.AddAsync(recipe, ct);
 
