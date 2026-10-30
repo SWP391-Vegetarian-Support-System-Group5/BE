@@ -463,7 +463,6 @@ public sealed class VideoRecipeDraftService(
     LocalVideoStorage storage,
     IVideoRecipeAnalyzer analyzer,
     IRecipeService recipes,
-    IModerationAiService moderationAiService,
     Microsoft.Extensions.Logging.ILogger<VideoRecipeDraftService> logger,
     VideoRecipeSettings settings) : IVideoRecipeDraftService
 {
@@ -520,17 +519,10 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "READY") throw new ServiceException("Only a ready video draft can be published.", 409);
-        if (!string.IsNullOrWhiteSpace(draft.Transcript))
-        {
-            var transcriptReason = await moderationAiService.FlagReasonAsync($"Lời nói trong video: {draft.Transcript}", ct);
-            if (transcriptReason is not null)
-            {
-                draft.ErrorMessage = transcriptReason;
-                draft.UpdatedAt = VietnamTime.Now;
-                await drafts.SaveChangesAsync(ct);
-                throw new ServiceException(transcriptReason, 422);
-            }
-        }
+        // Transcript is AI speech recognition, not the text that will be published. It can contain
+        // background conversation or recognition mistakes, so using it as a hard moderation gate
+        // creates false positives. RecipeService moderates the public title, description,
+        // ingredients and steps immediately below when it creates or updates the recipe.
         if (!VegetarianDietRules.IsVerifiedVegetarianRecipe(draft.Ingredients.Select(x => x.DietaryGroup)))
             throw new ServiceException("Bản nháp có nguyên liệu không chay hoặc chưa xác minh. Không thể đăng công thức.", 422);
         if (!LocalVideoStorage.IsCloudVideo(draft.VideoUrl))
