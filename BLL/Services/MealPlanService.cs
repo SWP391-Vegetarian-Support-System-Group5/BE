@@ -86,11 +86,14 @@ public class MealPlanService(
         if (filteredCandidates.Count == 0) throw new ServiceException("No recipes have been assigned to your BMI group that also match your vegetarian type and allergies. Please try again after an administrator reviews the recipes.", 400);
 
         var preferences = IngredientPreferences.Parse(request.AvailableIngredients);
-        var candidates = filteredCandidates
+        var scoredCandidates = filteredCandidates
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
+            .ToList();
+        var randomFallback = preferences.Length > 0 && scoredCandidates.All(item => item.Matches == 0);
+        var candidates = scoredCandidates
             .OrderByDescending(item => item.Matches)
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
-            .ThenBy(item => item.Recipe.PostId)
+            .ThenBy(item => randomFallback ? Random.Shared.Next() : item.Recipe.PostId)
             .Take(45)
             .Select(item => new MealCandidate(item.Recipe.PostId))
             .ToList();
@@ -175,15 +178,18 @@ public class MealPlanService(
             .ToListAsync(ct);
         var replacementUnsafeIds = await allergenMatcher.FindUnsafeAsync(user.UserAllergens.Select(x => x.Allergen).ToArray(),
             replacementCandidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
-        var replacement = replacementCandidates
+        var scoredReplacements = replacementCandidates
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
             .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
             .Where(x => IsAllergySafe(x, userAllergenIds, blockedGroups, user.UserAllergens, replacementUnsafeIds))
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
+            .ToList();
+        var randomReplacementFallback = preferences.Length > 0 && scoredReplacements.All(item => item.Matches == 0);
+        var replacement = scoredReplacements
             .OrderByDescending(item => item.Matches)
             .ThenBy(item => currentRecipeIdsInPlan.Contains(item.Recipe.PostId))
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
-            .ThenBy(item => item.Recipe.PostId)
+            .ThenBy(item => randomReplacementFallback ? Random.Shared.Next() : item.Recipe.PostId)
             .Select(item => item.Recipe)
             .FirstOrDefault();
 

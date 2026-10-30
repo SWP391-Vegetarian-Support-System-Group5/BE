@@ -77,10 +77,11 @@ public class ReferenceDataAndRestaurantService(
     }
     public async Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default)
     {
+        var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         var dietIds = await ValidateDietTypeIdsAsync(request.DietTypeIds, cancellationToken);
         var ingredientIds = await ValidateIngredientIdsAsync(request.IngredientIds, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var entity = new Restaurant { Name = request.Name.Trim(), Address = request.Address.Trim(), Latitude = request.Latitude, Longitude = request.Longitude };
+        var entity = new Restaurant { Name = request.Name.Trim(), Address = request.Address.Trim(), Latitude = request.Latitude, Longitude = request.Longitude, ImageUrl = imageUrl };
         await restaurants.AddAsync(entity, cancellationToken); await restaurants.SaveChangesAsync(cancellationToken);
         await ReplaceDietTypesAsync(entity.RestaurantId, dietIds, cancellationToken);
         await ReplaceFoodsAsync(entity.RestaurantId, request.Foods, cancellationToken);
@@ -90,11 +91,12 @@ public class ReferenceDataAndRestaurantService(
     }
     public async Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default)
     {
+        var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         var entity = await restaurants.FindAsync(id) ?? throw new ServiceException("Restaurant was not found.", 404);
         var dietIds = await ValidateDietTypeIdsAsync(request.DietTypeIds, cancellationToken);
         var ingredientIds = await ValidateIngredientIdsAsync(request.IngredientIds, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        entity.Name = request.Name.Trim(); entity.Address = request.Address.Trim(); entity.Latitude = request.Latitude; entity.Longitude = request.Longitude;
+        entity.Name = request.Name.Trim(); entity.Address = request.Address.Trim(); entity.Latitude = request.Latitude; entity.Longitude = request.Longitude; entity.ImageUrl = imageUrl;
         await restaurants.SaveChangesAsync(cancellationToken); await ReplaceDietTypesAsync(id, dietIds, cancellationToken); await ReplaceFoodsAsync(id, request.Foods, cancellationToken);
         await ReplaceIngredientsAsync(id, ingredientIds, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -154,7 +156,7 @@ public class ReferenceDataAndRestaurantService(
             await restaurantDietTypes.AddAsync(new RestaurantDietType { RestaurantId = restaurantId, DietTypeId = id }, ct);
         await restaurantDietTypes.SaveChangesAsync(ct);
     }
-    private static RestaurantResponse ToRestaurant(Restaurant x) => new(x.RestaurantId, x.Name, x.Address, x.Latitude, x.Longitude, x.DietTypes.Select(d => d.DietTypeId).OrderBy(id => id).ToList(), x.Foods.Select(f => f.FoodName).ToList(), x.Ingredients.Select(i => i.IngredientId).ToList(), x.Ingredients.Select(i => i.Ingredient.Name).ToList());
+    private static RestaurantResponse ToRestaurant(Restaurant x) => new(x.RestaurantId, x.Name, x.Address, x.Latitude, x.Longitude, x.DietTypes.Select(d => d.DietTypeId).OrderBy(id => id).ToList(), x.Foods.Select(f => f.FoodName).ToList(), x.Ingredients.Select(i => i.IngredientId).ToList(), x.Ingredients.Select(i => i.Ingredient.Name).ToList(), x.ImageUrl);
     private static decimal DistanceKm(decimal lat1, decimal lon1, decimal lat2, decimal lon2)
     {
         var dLat = DegreesToRadians((double)(lat2 - lat1)); var dLon = DegreesToRadians((double)(lon2 - lon1));

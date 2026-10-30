@@ -38,8 +38,8 @@ public class RecipeCategoryService(VegetarianDbContext db)
         if (id.HasValue && category.Type != type) throw new ServiceException("Category type cannot be changed.", 409);
         if (id.HasValue && type == "DIETARY_TYPE" && category.Slug != slug) throw new ServiceException("Dietary category identity cannot be changed.", 409);
         if (await db.RecipeCategories.AnyAsync(c => c.Id != (id ?? 0) && c.Type == type && c.Slug == slug, ct)) throw new ServiceException("Category already exists.", 409);
-        if (!string.IsNullOrWhiteSpace(request.ImageUrl) && (!Uri.TryCreate(request.ImageUrl, UriKind.Absolute, out var image) || image.Scheme != "https")) throw new ServiceException("Category image must be an HTTPS URL.");
-        category.Name = request.Name.Trim(); category.Slug = slug; category.Type = type; category.Description = request.Description?.Trim(); category.ImageUrl = request.ImageUrl; category.IsActive = request.IsActive;
+        var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
+        category.Name = request.Name.Trim(); category.Slug = slug; category.Type = type; category.Description = request.Description?.Trim(); category.ImageUrl = imageUrl; category.IsActive = request.IsActive;
         if (!id.HasValue) db.RecipeCategories.Add(category);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException ex) when (ex.InnerException is MySqlConnector.MySqlException { Number: 1062 })

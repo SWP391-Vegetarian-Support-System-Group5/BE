@@ -90,6 +90,9 @@ using var db = new VegetarianDbContext(new DbContextOptionsBuilder<VegetarianDbC
 var service = new RecipeCategoryService(db);
 void Check(bool valid, string name) { if (!valid) throw new Exception(name); Console.WriteLine("PASS " + name); }
 async Task Rejected(Func<Task> action, string name) { try { await action(); throw new Exception("Expected rejection: " + name); } catch (ServiceException) { Console.WriteLine("PASS " + name); } }
+Check(ImageUrlValidation.Normalize("https://res.cloudinary.com/demo/image/upload/sample.jpg") is not null, "accept Cloudinary image URL");
+await Rejected(() => Task.Run(() => ImageUrlValidation.Normalize("https://example.com/photo.jpg")), "reject external image URL");
+await Rejected(() => Task.Run(() => ImageUrlValidation.Normalize("https://res.cloudinary.com/demo/video/upload/sample.mp4")), "reject Cloudinary video as image URL");
 RecipeCategoryRequest Request(RecipeCategory c, bool active = true) => new(c.Name, c.Slug, c.Type, c.Description, c.ImageUrl, active);
 await service.SeedAsync(default);
 await service.SeedAsync(default);
@@ -131,12 +134,14 @@ var ingredientCatalog = new IngredientCatalogService(db, service, events);
 var recipeService = new RecipeService(new Repository<Post>(db), new Repository<Recipe>(db), new Repository<RecipeIngredient>(db), new Repository<RecipeStep>(db), new Repository<RecipeDietCompatibility>(db), new Repository<Allergen>(db), new Repository<DietType>(db), new Repository<ModerationFlag>(db), new MockModerationAiService(), events, service, ingredientCatalog, db, new RecipeBmiService(db, events));
 var dinner = await db.RecipeCategories.SingleAsync(c => c.Slug == "dinner");
 var request = new CreateRecipeRequest("Test post", "Test content", null, 10, 10, 2, null,
-    [new("Rice", "100g", "PLANT", null)], [new(1, "Cook rice")], "Rice bowl", [dinner.Id]);
+    [new("Rice", "100g", "PLANT", null)], [new(1, "Cook rice")], "Rice bowl", [dinner.Id], ImageUrl: "https://res.cloudinary.com/test/image/upload/v1/rice.jpg");
 var created = await recipeService.CreateAsync(1, request);
+Check(created.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/rice.jpg" && created.ThumbnailUrl == created.ImageUrl, "recipe image stored and used as thumbnail");
 Check(created.Categories.Count == 5, "create recipe persists selected + derived categories");
 Check((await recipeService.SearchAsync(null, dinner.Id, "MEAL_TYPE")).Any(r => r.PostId == created.PostId), "recipe search category + type");
-await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Cheese", "50g", "DAIRY", null)], CategoryIds = [] });
+await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Cheese", "50g", "DAIRY", null)], CategoryIds = [], ImageUrl = "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" });
 var updated = await recipeService.GetAsync(created.PostId);
+Check(updated.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" && updated.ThumbnailUrl == updated.ImageUrl, "recipe image updated");
 Check(updated.Categories.Count == 2 && updated.Categories.All(c => c.Slug != "vegan"), "editing dairy recalculates labels and removes old selection");
 Check(events.Items.SequenceEqual(["postCreated", "postUpdated"]), "recipe mutations publish realtime events");
 await ingredientCatalog.ResolveAsync([new("Rice", "200g", "PLANT", null)], default);
@@ -156,6 +161,7 @@ Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared i
 await BmiTests.RunAsync();
 await NotificationTests.RunAsync();
 await CustomAllergenTests.RunAsync();
+await GeminiReviewTests.RunAsync();
 
 sealed class TestEvents : ICommunityEventPublisher
 {

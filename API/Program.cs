@@ -58,6 +58,7 @@ var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<Clou
 builder.Services.AddSingleton(cloudinarySettings);
 var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
+builder.Services.AddScoped<IImageStorage, CloudinaryImageStorage>();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
@@ -70,12 +71,12 @@ builder.Services.AddHttpClient("Gemini", client =>
 builder.Services.AddHttpClient<IModerationAiService, GeminiModerationAiService>(client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
-    client.Timeout = TimeSpan.FromSeconds(15);
+    client.Timeout = TimeSpan.FromSeconds(40);
 });
 builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
-    client.Timeout = TimeSpan.FromSeconds(15);
+    client.Timeout = TimeSpan.FromSeconds(40);
 });
 builder.Services.AddHttpClient<IAllergenIngredientMatcher, GeminiAllergenIngredientMatcher>(client =>
 {
@@ -209,12 +210,14 @@ if (runDatabaseStartupTasks)
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await RecipeRestaurantImageSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RestaurantIngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
+    await LegacyUnusedSchemaCleanup.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await VideoRecipeDraftSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }
