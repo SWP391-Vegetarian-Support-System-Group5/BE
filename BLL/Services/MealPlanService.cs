@@ -137,10 +137,13 @@ public class MealPlanService(
 
     public async Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct = default)
     {
-        string cacheKey = $"MealPlan_Replace_{mealPlanId}";
+        // A replacement quota belongs to the calendar week, not to a rolling seven-day window.
+        // The v2 key intentionally starts a fresh quota for plans that used the former rolling cache key.
+        var weekStartUtc = StartOfWeekUtc(DateTime.UtcNow);
+        string cacheKey = $"MealPlan_Replace_v2_{mealPlanId}_{weekStartUtc:yyyyMMdd}";
         int replaceCount = cache.GetOrCreate(cacheKey, entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7);
+            entry.AbsoluteExpiration = new DateTimeOffset(weekStartUtc.AddDays(7), TimeSpan.Zero);
             return 0;
         });
 
@@ -200,6 +203,13 @@ public class MealPlanService(
 
         cache.Set(cacheKey, replaceCount + 1, TimeSpan.FromDays(7));
         return await GetByIdAsync(mealPlanId, userId, "USER", ct);
+    }
+
+    private static DateTime StartOfWeekUtc(DateTime timestamp)
+    {
+        var date = timestamp.Date;
+        var daysSinceMonday = ((int)date.DayOfWeek + 6) % 7;
+        return date.AddDays(-daysSinceMonday);
     }
 
     private static HashSet<string> BlockedIngredientGroups(IEnumerable<UserAllergen> allergies)
