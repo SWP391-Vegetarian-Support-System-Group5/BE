@@ -24,6 +24,16 @@ static class GeminiReviewTests
         Check((await moderation.FlagReasonAsync("Công thức này đúng là đồ ngu, đéo ăn được"))?.Contains("xúc phạm") == true && models.Count == 2,
             "obvious abuse remains blocked even while the provider is unavailable");
 
+        var harmlessRecipeCalls = 0;
+        using var harmlessRecipeClient = new HttpClient(new StubHandler(_ =>
+        {
+            harmlessRecipeCalls++;
+            return Reply(HttpStatusCode.OK, new { allowed = true, reason = "" });
+        })) { BaseAddress = new Uri("https://example.invalid/v1beta/") };
+        var harmlessRecipeModeration = new GeminiModerationAiService(harmlessRecipeClient, settings);
+        Check(await harmlessRecipeModeration.FlagReasonAsync("Nguyên liệu: vừa đủ dầu ăn, 1 ít muối hạt") is null && harmlessRecipeCalls == 1,
+            "Vietnamese cooking phrase 'vừa đủ' is not mistaken for profanity");
+
         var allergyResponses = new Queue<HttpStatusCode>([HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK]);
         using var allergyClient = new HttpClient(new StubHandler(_ => Reply(allergyResponses.Dequeue(),
             new { allowed = true, name = "Dừa", duplicateOf = "", reason = "" }))) { BaseAddress = new Uri("https://example.invalid/v1beta/") };

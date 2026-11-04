@@ -64,6 +64,7 @@ public record RecipeCategoryResponse(int Id, string Name, bool IsActive, DateTim
 public record RecipeCategoryRequest([Required, MaxLength(150)] string Name, bool IsActive = true);
 public record GenerateMealPlanRequest(DateTime? StartDate, string? AvailableIngredients, string? NutritionGoal = null, [Range(500, 1000)] int? CalorieAdjustment = null);
 public record MealPlanMealResponse(int MealPlanMealId, int DayNumber, string MealType, int RecipeId, string RecipeName, decimal? CaloriesPerServing = null);
+public record MealPlanRecipeOptionResponse(int RecipeId, string RecipeName, string? ImageUrl, decimal CaloriesPerServing, int? PrepMinutes, int? CookMinutes);
 public record MealPlanResponse(int MealPlanId, DateTime StartDate, decimal? BMI, string? BmiCategory, IReadOnlyCollection<MealPlanMealResponse> Meals, decimal? Tdee = null, decimal? TargetCaloriesPerDay = null, string? NutritionGoal = null, int? CalorieAdjustment = null, decimal? GoalWeightKg = null, decimal? HealthyWeightMinKg = null, decimal? HealthyWeightMaxKg = null, decimal? EstimatedWeeksToGoal = null);
 public record AiMealResponse(int Day, string MealType, int RecipeId);
 public record CreateChatSessionRequest();

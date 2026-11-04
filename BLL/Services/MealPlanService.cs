@@ -20,6 +20,7 @@ public class MealPlanService(
 {
     private sealed record MealCandidate(int Id, decimal Calories, int PreferenceRank);
     private sealed record PlannedMeal(int Day, string MealType, int RecipeId, decimal Calories);
+    private sealed record MealReplacementContext(MealPlan Plan, MealPlanMeal Meal, IReadOnlyList<Recipe> Candidates);
     public async Task<MealPlanResponse> GenerateAsync(int userId, GenerateMealPlanRequest request, CancellationToken ct = default)
     {
         return await GeneratePlanCoreAsync(userId, request, isRegenerate: false, ct);
@@ -112,8 +113,15 @@ public class MealPlanService(
         var scoredCandidates = calorieReadyCandidates
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .ToList();
-        var randomFallback = preferences.Length > 0 && scoredCandidates.All(item => item.Matches == 0);
-        var candidates = scoredCandidates
+        // When the user entered pantry ingredients, use matching recipes only.
+        // Falling back to the full eligible catalog is intentional only when no
+        // recipe contains any entered ingredient.
+        var pantryMatches = preferences.Length > 0
+            ? scoredCandidates.Where(item => item.Matches > 0).ToList()
+            : [];
+        var candidatePool = pantryMatches.Count > 0 ? pantryMatches : scoredCandidates;
+        var randomFallback = preferences.Length > 0 && pantryMatches.Count == 0;
+        var candidates = candidatePool
             .OrderByDescending(item => item.Matches)
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
             .ThenBy(item => randomFallback ? Random.Shared.Next() : item.Recipe.PostId)
@@ -150,19 +158,32 @@ public class MealPlanService(
         if (candidates.Count == 0) throw new ServiceException("The system does not have any suitable recipes to create a meal plan.", 400);
         var result = new List<PlannedMeal>(21);
         var mealTypes = new[] { "BREAKFAST", "LUNCH", "DINNER" };
+        // Rotate through eligible recipes before reusing one. This still keeps each
+        // day's calories close to target, while preventing one closest-calorie dish
+        // from filling all 21 meal slots.
+        var usageCounts = candidates.ToDictionary(candidate => candidate.Id, _ => 0);
         var index = 0;
         for (var day = 1; day <= 7; day++)
         {
             var remaining = targetCalories;
+            var usedToday = new HashSet<int>();
             for (var mealIndex = 0; mealIndex < mealTypes.Length; mealIndex++)
             {
                 var desired = remaining / (mealTypes.Length - mealIndex);
-                var choice = candidates
+                var availableToday = candidates.Where(candidate => !usedToday.Contains(candidate.Id)).ToList();
+                // If fewer than three recipes match the user's strict profile, a
+                // repeat is unavoidable; only then allow it within the same day.
+                var pool = availableToday.Count > 0 ? availableToday : candidates.ToList();
+                var leastUsage = pool.Min(candidate => usageCounts[candidate.Id]);
+                var choice = pool
+                    .Where(candidate => usageCounts[candidate.Id] == leastUsage)
                     .OrderBy(candidate => Math.Abs(candidate.Calories - desired))
                     .ThenBy(candidate => candidate.PreferenceRank)
                     .ThenBy(candidate => Math.Abs((candidate.Id % candidates.Count) - (index % candidates.Count)))
                     .First();
                 result.Add(new PlannedMeal(day, mealTypes[mealIndex], choice.Id, choice.Calories));
+                usedToday.Add(choice.Id);
+                usageCounts[choice.Id]++;
                 remaining -= choice.Calories;
                 index++;
             }
@@ -170,79 +191,96 @@ public class MealPlanService(
         return result;
     }
 
-    public async Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct = default)
+    public Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct = default) =>
+        ReplaceMealAsync(mealPlanId, mealPlanMealId, userId, null, ct);
+
+    public async Task<MealPlanResponse> ReplaceMealAsync(int mealPlanId, int mealPlanMealId, int userId, int? recipeId, CancellationToken ct = default)
     {
-        // A replacement quota belongs to the calendar week, not to a rolling seven-day window.
-        // The v2 key intentionally starts a fresh quota for plans that used the former rolling cache key.
-        var weekStartUtc = StartOfWeekUtc(DateTime.UtcNow);
-        string cacheKey = $"MealPlan_Replace_v2_{mealPlanId}_{weekStartUtc:yyyyMMdd}";
+        var today = VietnamTime.Now.Date;
+        var resetAt = new DateTimeOffset(today.AddDays(1), TimeSpan.FromHours(7));
+        string cacheKey = $"MealPlan_Replace_v3_{mealPlanId}_{today:yyyyMMdd}";
         int replaceCount = cache.GetOrCreate(cacheKey, entry =>
         {
-            entry.AbsoluteExpiration = new DateTimeOffset(weekStartUtc.AddDays(7), TimeSpan.Zero);
+            entry.AbsoluteExpiration = resetAt;
             return 0;
         });
-
         if (replaceCount >= 5)
-            throw new ServiceException("You have reached the meal replacement limit (5 times/week).", 429);
+            throw new ServiceException("Bạn đã dùng hết 5 lượt đổi món hôm nay. Lượt đổi món sẽ được làm mới vào 00:00 ngày mai.", 429);
 
+        var context = await GetReplacementContextAsync(mealPlanId, mealPlanMealId, userId, ct);
+        var replacement = recipeId.HasValue
+            ? context.Candidates.FirstOrDefault(recipe => recipe.PostId == recipeId.Value)
+            : context.Candidates.FirstOrDefault();
+        if (replacement is null)
+            throw new ServiceException(recipeId.HasValue
+                ? "Món bạn chọn không còn phù hợp với kiểu ăn chay, dị ứng hoặc nguyên liệu trong hồ sơ."
+                : "Không có món phù hợp để thay thế.", recipeId.HasValue ? 422 : 404);
+
+        context.Meal.RecipeId = replacement.PostId;
+        context.Meal.PlannedCalories = replacement.CaloriesPerServing;
+        await mealPlanMeals.SaveChangesAsync(ct);
+        cache.Set(cacheKey, replaceCount + 1, resetAt);
+        return await GetByIdAsync(mealPlanId, userId, "USER", ct);
+    }
+
+    public async Task<IReadOnlyCollection<MealPlanRecipeOptionResponse>> GetReplacementOptionsAsync(int mealPlanId, int mealPlanMealId, int userId, string? query, CancellationToken ct = default)
+    {
+        var context = await GetReplacementContextAsync(mealPlanId, mealPlanMealId, userId, ct);
+        var term = query?.Trim();
+        return context.Candidates
+            .Where(recipe => string.IsNullOrWhiteSpace(term) || recipe.RecipeName.Contains(term, StringComparison.OrdinalIgnoreCase) || recipe.Post.Title.Contains(term, StringComparison.OrdinalIgnoreCase))
+            .Take(60)
+            .Select(recipe => new MealPlanRecipeOptionResponse(recipe.PostId, recipe.RecipeName, recipe.ImageUrl ?? recipe.Post.ThumbnailUrl, recipe.CaloriesPerServing!.Value, recipe.PrepMinutes, recipe.CookMinutes))
+            .ToList();
+    }
+
+    private async Task<MealReplacementContext> GetReplacementContextAsync(int mealPlanId, int mealPlanMealId, int userId, CancellationToken ct)
+    {
         var plan = await mealPlans.Query().Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.Post)
             .Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.Meals).ThenInclude(x => x.Recipe).ThenInclude(x => x.DietCompatibilities)
             .SingleOrDefaultAsync(x => x.MealPlanId == mealPlanId && x.UserId == userId, ct) ?? throw new ServiceException("Meal plan not found.", 404);
         var mealToReplace = plan.Meals.FirstOrDefault(x => x.MealPlanMealId == mealPlanMealId) ?? throw new ServiceException("Meal not found in plan.", 404);
-
         var user = await users.Query().Include(x => x.Profile).ThenInclude(x => x!.DietType).Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, ct) ?? throw new ServiceException("User not found.", 404);
-        var planUnsafeIds = await allergenMatcher.FindUnsafeAsync(user.UserAllergens.Select(x => x.Allergen).ToArray(),
-            plan.Meals.SelectMany(x => x.Recipe.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
+        if (user.Profile?.DietType is null) throw new ServiceException("Choose your vegetarian type in your profile before creating a meal plan.", 400);
+        var planUnsafeIds = await allergenMatcher.FindUnsafeAsync(user.UserAllergens.Select(x => x.Allergen).ToArray(), plan.Meals.SelectMany(x => x.Recipe.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
         if (!IsPlanSuitable(plan, user, planUnsafeIds)) throw new ServiceException("This meal plan no longer matches your profile. Generate a new plan before replacing meals.", 409);
+
         var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
         var blockedGroups = BlockedIngredientGroups(user.UserAllergens);
-        var dietTypeId = user.Profile?.DietTypeId;
         var preferences = IngredientPreferences.Parse(plan.AvailableIngredients);
-        if (user.Profile?.DietType is null) throw new ServiceException("Choose your vegetarian type in your profile before creating a meal plan.", 400);
-
         var currentRecipeIdsInPlan = plan.Meals.Select(x => x.RecipeId).ToHashSet();
-
         var replacementCandidates = await recipes.Query()
             .Include(x => x.Post)
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.DietCompatibilities)
             .Where(x => x.Post.Status == "PUBLISHED" && x.PostId != mealToReplace.RecipeId)
             .Where(x => x.CaloriesPerServing.HasValue && x.CaloriesPerServing > 0)
-            .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
+            .Where(x => x.DietCompatibilities.Any(d => d.DietTypeId == user.Profile.DietTypeId && d.IsCompatible))
             .ToListAsync(ct);
-        var replacementUnsafeIds = await allergenMatcher.FindUnsafeAsync(user.UserAllergens.Select(x => x.Allergen).ToArray(),
-            replacementCandidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
-        var scoredReplacements = replacementCandidates
+        var replacementUnsafeIds = await allergenMatcher.FindUnsafeAsync(user.UserAllergens.Select(x => x.Allergen).ToArray(), replacementCandidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
+        var scored = replacementCandidates
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
-            .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
+            .Where(x => VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile.DietType!.Name))
             .Where(x => IsAllergySafe(x, userAllergenIds, blockedGroups, user.UserAllergens, replacementUnsafeIds))
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .ToList();
-        var randomReplacementFallback = preferences.Length > 0 && scoredReplacements.All(item => item.Matches == 0);
-        var replacement = scoredReplacements
-            .OrderByDescending(item => item.Matches)
+        var pantryMatches = preferences.Length > 0 ? scored.Where(item => item.Matches > 0).ToList() : [];
+        var pool = pantryMatches.Count > 0 ? pantryMatches : scored;
+        var randomFallback = preferences.Length > 0 && pantryMatches.Count == 0;
+        var caloriesAlreadyPlannedToday = plan.Meals
+            .Where(meal => meal.DayNumber == mealToReplace.DayNumber && meal.MealPlanMealId != mealToReplace.MealPlanMealId)
+            .Sum(meal => meal.PlannedCalories ?? meal.Recipe.CaloriesPerServing ?? 0m);
+        var desiredMealCalories = plan.TargetCaloriesPerDay.HasValue
+            ? Math.Max(100m, plan.TargetCaloriesPerDay.Value - caloriesAlreadyPlannedToday)
+            : mealToReplace.PlannedCalories ?? mealToReplace.Recipe.CaloriesPerServing ?? 0m;
+        var candidates = pool.OrderByDescending(item => item.Matches)
             .ThenBy(item => currentRecipeIdsInPlan.Contains(item.Recipe.PostId))
             .ThenByDescending(item => item.Matches / (double)Math.Max(1, item.Recipe.Ingredients.Count))
-            .ThenBy(item => randomReplacementFallback ? Random.Shared.Next() : item.Recipe.PostId)
-            .Select(item => item.Recipe)
-            .FirstOrDefault();
-
-        if (replacement == null) throw new ServiceException("No suitable meal found for replacement.", 404);
-
-        mealToReplace.RecipeId = replacement.PostId;
-        mealToReplace.PlannedCalories = replacement.CaloriesPerServing;
-        await mealPlanMeals.SaveChangesAsync(ct);
-
-        cache.Set(cacheKey, replaceCount + 1, TimeSpan.FromDays(7));
-        return await GetByIdAsync(mealPlanId, userId, "USER", ct);
-    }
-
-    private static DateTime StartOfWeekUtc(DateTime timestamp)
-    {
-        var date = timestamp.Date;
-        var daysSinceMonday = ((int)date.DayOfWeek + 6) % 7;
-        return date.AddDays(-daysSinceMonday);
+            .ThenBy(item => Math.Abs(item.Recipe.CaloriesPerServing!.Value - desiredMealCalories))
+            .ThenBy(item => randomFallback ? Random.Shared.Next() : item.Recipe.PostId)
+            .Select(item => item.Recipe).ToList();
+        return new MealReplacementContext(plan, mealToReplace, candidates);
     }
 
     private static HashSet<string> BlockedIngredientGroups(IEnumerable<UserAllergen> allergies)

@@ -25,10 +25,14 @@ public class MealPlansController(IMealPlanService mealPlanService) : ControllerB
         return Ok(plan);
     }
 
+    [HttpGet("{id:int}/meals/{mealId:int}/replacement-options")]
+    public Task<IReadOnlyCollection<MealPlanRecipeOptionResponse>> GetReplacementOptions(int id, int mealId, [FromQuery] string? query, CancellationToken ct)
+        => mealPlanService.GetReplacementOptionsAsync(id, mealId, User.GetRequiredUserId(), query, ct);
+
     [HttpPut("{id:int}/meals/{mealId:int}/replace")]
-    public async Task<ActionResult<MealPlanResponse>> Replace(int id, int mealId, CancellationToken ct)
+    public async Task<ActionResult<MealPlanResponse>> Replace(int id, int mealId, [FromBody] int? recipeId, CancellationToken ct)
     {
-        var plan = await mealPlanService.ReplaceMealAsync(id, mealId, User.GetRequiredUserId(), ct);
+        var plan = await mealPlanService.ReplaceMealAsync(id, mealId, User.GetRequiredUserId(), recipeId, ct);
         return Ok(plan);
     }
 

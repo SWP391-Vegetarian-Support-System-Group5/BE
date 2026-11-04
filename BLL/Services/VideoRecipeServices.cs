@@ -617,7 +617,14 @@ public sealed class VideoRecipeDraftService(
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status == "PUBLISHED") throw new ServiceException("A published draft keeps its video as part of the recipe.", 409);
         if (draft.RecipePostId.HasValue) await recipes.DeleteAsync(draft.RecipePostId.Value, userId, role, ct);
-        storage.Delete(draft.VideoUrl); drafts.Remove(draft); await drafts.SaveChangesAsync(ct);
+        // The database intentionally uses NO ACTION for these child foreign keys.
+        // Delete them explicitly before removing the draft, otherwise MySQL rejects
+        // every READY draft that already contains AI-generated ingredients/steps.
+        foreach (var item in draft.Ingredients.ToList()) ingredients.Remove(item);
+        foreach (var item in draft.Steps.ToList()) steps.Remove(item);
+        drafts.Remove(draft);
+        await drafts.SaveChangesAsync(ct);
+        storage.Delete(draft.VideoUrl);
     }
 
     public async Task ProcessPendingAsync(CancellationToken ct = default)
