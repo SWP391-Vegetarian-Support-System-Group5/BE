@@ -46,7 +46,7 @@ public record RestaurantResponse(int RestaurantId, string Name, string Address, 
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl, string? Status);
 public record PostDietTypeResponse(int Id, string Name);
-public record PostResponse(int PostId, int UserId, string AuthorName, string Title, string Content, string PostType, string? VideoUrl, string? ThumbnailUrl, string Status, double AverageRating, int RatingCount, int CommentCount, int? CurrentUserRating, DateTime CreatedAt, DateTime UpdatedAt, IReadOnlyCollection<PostDietTypeResponse> CompatibleDietTypes, string? ModerationReason = null);
+public record PostResponse(int PostId, int UserId, string AuthorName, string Title, string Content, string PostType, string? VideoUrl, string? ThumbnailUrl, string Status, double AverageRating, int RatingCount, int CommentCount, int? CurrentUserRating, DateTime CreatedAt, DateTime UpdatedAt, IReadOnlyCollection<PostDietTypeResponse> CompatibleDietTypes, string? ModerationReason = null, string? ImageUrl = null, decimal? CaloriesPerServing = null);
 public record CommentRequest([Required] string Content);
 public record UpdateCommentVisibilityRequest([property: System.Text.Json.Serialization.JsonRequired] bool Hidden);
 public record CommentResponse(int CommentId, int PostId, int UserId, string AuthorName, int? ParentCommentId, string Content, string Status, IReadOnlyCollection<CommentResponse> Replies, DateTime CreatedAt, DateTime UpdatedAt);

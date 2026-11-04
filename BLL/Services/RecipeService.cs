@@ -148,7 +148,10 @@ public class RecipeService(
         actorId.HasValue ? x.Ratings.FirstOrDefault(r => r.UserId == actorId.Value)?.Rating : null,
         x.CreatedAt,
         x.UpdatedAt,
-        x.Recipe?.DietCompatibilities.Where(d => d.IsCompatible).OrderBy(d => d.DietTypeId).Select(d => new PostDietTypeResponse(d.DietTypeId, d.DietType.Name)).ToList() ?? []);
+        x.Recipe?.DietCompatibilities.Where(d => d.IsCompatible).OrderBy(d => d.DietTypeId).Select(d => new PostDietTypeResponse(d.DietTypeId, d.DietType.Name)).ToList() ?? [],
+        null,
+        x.Recipe?.ImageUrl,
+        x.Recipe?.CaloriesPerServing);
     private static void ValidateRecipeRequest(CreateRecipeRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.RecipeName) || request.RecipeName.Trim().Length > 250) throw new ServiceException("Recipe name is required and must not exceed 250 characters.");
