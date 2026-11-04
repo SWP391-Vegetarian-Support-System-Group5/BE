@@ -10,6 +10,9 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
 {
     public async Task<UserResponse> UpdateAsync(int userId, UpdateUserProfileRequest request, CancellationToken cancellationToken = default)
     {
+        if (request.BirthYear.HasValue && (request.BirthYear.Value < 1 || request.BirthYear.Value > VietnamTime.Now.Year))
+            throw new ServiceException("Birth year must be between 1 and the current year.", 400);
+
         var profile = await profiles.Query().Include(x => x.User).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             ?? throw new ServiceException("User profile was not found.", 404);
         if (request.DietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == request.DietTypeId.Value, cancellationToken))

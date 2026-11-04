@@ -100,7 +100,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => x.UserId);
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);
-            entity.Property(x => x.BirthYear);
+            entity.Property(x => x.BirthYear).HasColumnType("int");
             entity.Property(x => x.HeightCm).HasPrecision(5, 2);
             entity.Property(x => x.WeightKg).HasPrecision(6, 2);
             entity.Property(x => x.ActivityLevel).HasMaxLength(30).IsUnicode(false);

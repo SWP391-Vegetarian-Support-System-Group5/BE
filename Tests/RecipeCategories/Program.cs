@@ -8,6 +8,12 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--birth-year"))
+{
+    await BirthYearTests.RunAsync();
+    return;
+}
+
 if (args.Contains("--admin-api"))
 {
     await AdminApiTests.RunAsync();

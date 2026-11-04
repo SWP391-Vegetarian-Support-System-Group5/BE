@@ -41,7 +41,13 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.MaxRequestBodySize = maxUploadSize;
 });
-var connectionString = builder.Configuration.GetConnectionString("VegetarianSupportDatabase") ?? throw new InvalidOperationException("Database connection string is not configured.");
+var connectionString = builder.Configuration.GetConnectionString("VegetarianSupportDatabase");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "Database connection string is missing or empty. Set ConnectionStrings__VegetarianSupportDatabase " +
+        "in API/.env, API/.aiven.env, or environment variables to a valid MySQL connection string.");
+}
 var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOperationException("JWT signing key is not configured or is too short.");
 
