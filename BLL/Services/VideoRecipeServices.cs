@@ -25,6 +25,55 @@ public interface IVideoRecipeAnalyzer
 
 public sealed record GeneratedVideoRecipe(string Title, string Description, string Transcript, int? EstimatedPrepMinutes, decimal? CaloriesPerServing, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, string GeminiFileName);
 
+/// <summary>
+/// Conservative fallback for video drafts when the model identifies ingredients
+/// but cannot reliably calculate nutrition. It is deliberately an estimate for
+/// one standard serving (two servings per home-cooked recipe by default), not a
+/// clinical nutrition claim.
+/// </summary>
+internal static class VideoRecipeCalorieEstimator
+{
+    private static readonly (string Term, decimal KcalPer100g)[] EnergyDensity =
+    [
+        ("dầu", 884), ("nước cốt dừa", 230), ("bơ đậu phộng", 588), ("hạt điều", 553), ("hạnh nhân", 579),
+        ("mè", 573), ("đậu phộng", 567), ("đường", 387), ("bột", 360), ("yến mạch", 389),
+        ("gạo", 365), ("quinoa", 368), ("miến", 351), ("mì", 138), ("pasta", 371), ("bánh mì", 265),
+        ("đậu hũ", 76), ("đậu gà", 164), ("đậu lăng", 353), ("đậu đen", 132), ("đậu đỏ", 127),
+        ("đậu xanh", 347), ("nấm", 22), ("khoai", 80), ("bí", 26), ("cà tím", 25), ("cà rốt", 41),
+        ("cà chua", 18), ("bắp", 86), ("chuối", 89), ("xoài", 60), ("táo", 52), ("dừa", 354)
+    ];
+
+    private static readonly Dictionary<string, decimal> UnitWeights = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["kg"] = 1000, ["ml"] = 1, ["muỗng canh"] = 15, ["muỗng"] = 15,
+        ["thìa"] = 5, ["chén"] = 180, ["bát"] = 250, ["lát"] = 30, ["miếng"] = 50,
+        ["củ"] = 80, ["quả"] = 120, ["cái"] = 80, ["g"] = 1
+    };
+
+    public static decimal? EstimatePerServing(IEnumerable<IngredientRequest> ingredients)
+    {
+        var items = ingredients.Where(item => !string.IsNullOrWhiteSpace(item.IngredientName)).ToList();
+        if (items.Count == 0) return null;
+        decimal total = 0;
+        foreach (var item in items)
+        {
+            var density = EnergyDensity.FirstOrDefault(entry => item.IngredientName.Contains(entry.Term, StringComparison.OrdinalIgnoreCase)).KcalPer100g;
+            if (density <= 0) density = 30m;
+            total += density * EstimateGrams(item.Amount) / 100m;
+        }
+        return Math.Clamp(Math.Round(total / 2m, 0), 40m, 1500m);
+    }
+
+    private static decimal EstimateGrams(string? amount)
+    {
+        if (string.IsNullOrWhiteSpace(amount)) return 35m;
+        var match = System.Text.RegularExpressions.Regex.Match(amount.Replace(',', '.'), @"\d+(?:\.\d+)?");
+        if (!match.Success || !decimal.TryParse(match.Value, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var value)) return 35m;
+        var unit = UnitWeights.FirstOrDefault(entry => amount.Contains(entry.Key, StringComparison.OrdinalIgnoreCase));
+        return unit.Value > 0 ? value * unit.Value : value * 35m;
+    }
+}
+
 public sealed class LocalVideoStorage(VideoRecipeSettings settings, CloudinarySettings cloudinarySettings, ILogger<LocalVideoStorage>? logger = null)
 {
     private static readonly HttpClient DownloadClient = new();
@@ -199,7 +248,7 @@ public sealed class LocalVideoStorage(VideoRecipeSettings settings, CloudinarySe
 public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatbotSettings settings, ILogger<GeminiVideoRecipeAnalyzer>? logger = null) : IVideoRecipeAnalyzer
 {
     private const long InlineVideoLimitBytes = 12 * 1024 * 1024;
-    private const string RecipePrompt = "Analyze this cooking video. Return only valid JSON. Write recipe text in Vietnamese. Transcribe the spoken cooking instructions faithfully in their original language into transcript, preserving all cooking instructions, not a short summary. If no speech is present, transcript must be an empty string. List every ingredient explicitly shown or said; never silently omit meat, poultry, fish, shellfish, animal broth, gelatin, or uncertain animal-derived ingredients. Classify each ingredient as PLANT, DAIRY, EGG, HONEY, MEAT, POULTRY, FISH, SHELLFISH, ANIMAL_BROTH, GELATIN, or UNVERIFIED. Plant-based milk is PLANT; animal milk is DAIRY. Put the names of every non-vegetarian or uncertain ingredient in nonVegetarianIngredients, even if it is absent from the recipe ingredient list. Leave that array empty only if all ingredients are confirmed vegetarian. Estimate caloriesPerServing only from visible/spoken ingredients, their quantities and the shown number of servings; return null when the evidence is insufficient. Do not infer ingredients from the dish title or invent quantities. title, description, transcript, ingredients, nonVegetarianIngredients, and steps are required.";
+    private const string RecipePrompt = "Analyze this cooking video. Return only valid JSON. Write recipe text in Vietnamese. Transcribe the spoken cooking instructions faithfully in their original language into transcript, preserving all cooking instructions, not a short summary. If no speech is present, transcript must be an empty string. List every ingredient explicitly shown or said; never silently omit meat, poultry, fish, shellfish, animal broth, gelatin, or uncertain animal-derived ingredients. Classify each ingredient as PLANT, DAIRY, EGG, HONEY, MEAT, POULTRY, FISH, SHELLFISH, ANIMAL_BROTH, GELATIN, or UNVERIFIED. Plant-based milk is PLANT; animal milk is DAIRY. Put the names of every non-vegetarian or uncertain ingredient in nonVegetarianIngredients, even if it is absent from the recipe ingredient list. Leave that array empty only if all ingredients are confirmed vegetarian. caloriesPerServing is required: return a positive whole-number kcal estimate for ONE standard serving. Calculate from the detected ingredients and stated amounts; when amount or servings are missing, use typical Vietnamese home-cooking portions and clearly treat it as an estimate. Never return null. Do not invent an ingredient that is not seen or spoken. title, description, transcript, caloriesPerServing, ingredients, nonVegetarianIngredients, and steps are required.";
 
     public async Task<GeneratedVideoRecipe> AnalyzeAsync(string videoPath, string contentType, CancellationToken cancellationToken = default)
     {
@@ -296,12 +345,12 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
                     type = "OBJECT",
                     properties = new
                     {
-                        title = new { type = "STRING" }, description = new { type = "STRING" }, transcript = new { type = "STRING" }, estimatedPrepMinutes = new { type = "INTEGER", nullable = true }, caloriesPerServing = new { type = "NUMBER", nullable = true },
+                        title = new { type = "STRING" }, description = new { type = "STRING" }, transcript = new { type = "STRING" }, estimatedPrepMinutes = new { type = "INTEGER", nullable = true }, caloriesPerServing = new { type = "NUMBER" },
                         ingredients = new { type = "ARRAY", items = new { type = "OBJECT", properties = new { ingredientName = new { type = "STRING" }, amount = new { type = "STRING", nullable = true }, dietaryGroup = new { type = "STRING" } }, required = new[] { "ingredientName", "dietaryGroup" } } },
                         nonVegetarianIngredients = new { type = "ARRAY", items = new { type = "STRING" } },
                         steps = new { type = "ARRAY", items = new { type = "OBJECT", properties = new { stepNumber = new { type = "INTEGER" }, instruction = new { type = "STRING" } }, required = new[] { "stepNumber", "instruction" } } }
                     },
-                    required = new[] { "title", "description", "transcript", "ingredients", "nonVegetarianIngredients", "steps" }
+                    required = new[] { "title", "description", "transcript", "caloriesPerServing", "ingredients", "nonVegetarianIngredients", "steps" }
                 }
             }
         };
@@ -330,6 +379,7 @@ public sealed class GeminiVideoRecipeAnalyzer(HttpClient httpClient, GeminiChatb
             ? transcriptElement.GetString() ?? string.Empty
             : string.Empty;
         decimal? calories = root.TryGetProperty("caloriesPerServing", out var caloriesElement) && caloriesElement.ValueKind == JsonValueKind.Number && caloriesElement.TryGetDecimal(out var parsedCalories) && parsedCalories is > 0 and <= 10000 ? Math.Round(parsedCalories, 0) : null;
+        calories ??= VideoRecipeCalorieEstimator.EstimatePerServing(ingredients);
         return new(root.GetProperty("title").GetString() ?? "Video recipe", root.GetProperty("description").GetString() ?? string.Empty, transcript, root.TryGetProperty("estimatedPrepMinutes", out var minutes) && minutes.ValueKind == JsonValueKind.Number ? minutes.GetInt32() : null, calories, ingredients, steps, string.Empty);
     }
 
@@ -484,7 +534,17 @@ public sealed class VideoRecipeDraftService(
         return ToResponse(draft);
     }
 
-    public async Task<VideoRecipeDraftResponse> GetAsync(int id, int userId, string role, CancellationToken ct = default) => ToResponse(await GetOwnedDraftAsync(id, userId, role, ct));
+    public async Task<VideoRecipeDraftResponse> GetAsync(int id, int userId, string role, CancellationToken ct = default)
+    {
+        var draft = await GetOwnedDraftAsync(id, userId, role, ct);
+        if (!draft.CaloriesPerServing.HasValue && draft.Ingredients.Count > 0)
+        {
+            draft.CaloriesPerServing = VideoRecipeCalorieEstimator.EstimatePerServing(draft.Ingredients.Select(item => new IngredientRequest(item.IngredientName, item.Amount, item.DietaryGroup, item.AllergenId)));
+            draft.UpdatedAt = VietnamTime.Now;
+            await drafts.SaveChangesAsync(ct);
+        }
+        return ToResponse(draft);
+    }
 
     public async Task<IReadOnlyCollection<VideoRecipeDraftResponse>> GetMineAsync(int userId, CancellationToken ct = default) =>
         (await drafts.Query().AsNoTracking().Include(x => x.Ingredients).Include(x => x.Steps)
@@ -498,7 +558,7 @@ public sealed class VideoRecipeDraftService(
         ValidateDraftDetails(request.Title, request.Description, request.EstimatedPrepMinutes, request.Ingredients, request.Steps);
         foreach (var item in draft.Ingredients) ingredients.Remove(item);
         foreach (var item in draft.Steps) steps.Remove(item);
-        draft.RecipeName = request.RecipeName?.Trim() ?? draft.RecipeName; draft.Title = request.Title.Trim(); draft.Description = request.Description.Trim(); draft.Transcript = request.Transcript?.Trim(); draft.EstimatedPrepMinutes = request.EstimatedPrepMinutes; draft.CaloriesPerServing = request.CaloriesPerServing; draft.UpdatedAt = VietnamTime.Now;
+        draft.RecipeName = request.RecipeName?.Trim() ?? draft.RecipeName; draft.Title = request.Title.Trim(); draft.Description = request.Description.Trim(); draft.Transcript = request.Transcript?.Trim(); draft.EstimatedPrepMinutes = request.EstimatedPrepMinutes; draft.CaloriesPerServing = request.CaloriesPerServing ?? VideoRecipeCalorieEstimator.EstimatePerServing(request.Ingredients); draft.UpdatedAt = VietnamTime.Now;
         foreach (var item in request.Ingredients) await ingredients.AddAsync(new VideoRecipeDraftIngredient { VideoRecipeDraftId = id, IngredientName = item.IngredientName.Trim(), Amount = item.Amount?.Trim(), DietaryGroup = VegetarianDietRules.NormalizeIngredientGroup(item.DietaryGroup), AllergenId = item.AllergenId }, ct);
         foreach (var item in request.Steps) await steps.AddAsync(new VideoRecipeDraftStep { VideoRecipeDraftId = id, StepNumber = item.StepNumber, Instruction = item.Instruction.Trim() }, ct);
         await drafts.SaveChangesAsync(ct);
@@ -526,6 +586,7 @@ public sealed class VideoRecipeDraftService(
         // ingredients and steps immediately below when it creates or updates the recipe.
         if (!VegetarianDietRules.IsVerifiedVegetarianRecipe(draft.Ingredients.Select(x => x.DietaryGroup)))
             throw new ServiceException("Bản nháp có nguyên liệu không chay hoặc chưa xác minh. Không thể đăng công thức.", 422);
+        draft.CaloriesPerServing ??= VideoRecipeCalorieEstimator.EstimatePerServing(draft.Ingredients.Select(item => new IngredientRequest(item.IngredientName, item.Amount, item.DietaryGroup, item.AllergenId)));
         if (!LocalVideoStorage.IsCloudVideo(draft.VideoUrl))
         {
             draft.VideoUrl = await storage.UploadStagedAsync(draft.VideoUrl, ct);
