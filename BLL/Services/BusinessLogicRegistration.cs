@@ -17,7 +17,6 @@ public static class BusinessLogicRegistration
         services.AddScoped<IPostService, PostService>();
         services.AddScoped<IRecipeService, RecipeService>();
         services.AddScoped<RecipeCategoryService>();
-        services.AddScoped<RecipeBmiService>();
         services.AddScoped<IngredientCatalogService>();
         services.AddScoped<IMealPlanService, MealPlanService>();
         services.AddScoped<IChatService, NutritionChatbotService>();

@@ -120,7 +120,7 @@ public class AuthService(
         user.Role,
         user.Profile?.FullName ?? "Unknown user",
         user.Profile?.Sex,
-        user.Profile?.BirthDate,
+        user.Profile?.BirthYear,
         user.Profile?.HeightCm,
         user.Profile?.WeightKg,
         user.Profile?.ActivityLevel,
@@ -129,7 +129,8 @@ public class AuthService(
         user.Profile?.Longitude,
         user.IsActive,
         user.CreatedAt,
-        user.IsEmailVerified);
+        user.IsEmailVerified,
+        user.Profile?.GoalWeightKg);
 
     private async Task<EmailOtpSentResponse> CreateAndSendOtpAsync(string email, string purpose, CancellationToken cancellationToken)
     {

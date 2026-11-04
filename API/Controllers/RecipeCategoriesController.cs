@@ -10,7 +10,7 @@ namespace API.Controllers;
 public class RecipeCategoriesController(RecipeCategoryService service) : ControllerBase
 {
     [HttpGet]
-    public Task<IReadOnlyCollection<RecipeCategoryResponse>> Get(string? type, bool includeInactive, CancellationToken ct) => service.ListAsync(type, includeInactive && User.IsInRole("ADMIN"), ct);
+    public Task<IReadOnlyCollection<RecipeCategoryResponse>> Get(bool includeInactive, CancellationToken ct) => service.ListAsync(includeInactive && User.IsInRole("ADMIN"), ct);
     [Authorize(Roles = "ADMIN")]
     [HttpPost]
     public async Task<ActionResult<RecipeCategoryResponse>> Create(RecipeCategoryRequest request, CancellationToken ct)

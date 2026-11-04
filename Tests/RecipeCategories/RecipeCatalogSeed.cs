@@ -30,7 +30,7 @@ internal static class RecipeCatalogSeed
         var records = ReadRecords();
         if (records.Count != 100 || records.GroupBy(record => record.CategorySlug).Any(group => group.Count() != 10))
             throw new InvalidOperationException("Recipe source must contain exactly 10 recipes for each category.");
-        var categories = await db.RecipeCategories.Where(category => category.IsActive).ToDictionaryAsync(category => category.Slug);
+        var categories = (await db.RecipeCategories.Where(category => category.IsActive).ToListAsync()).ToDictionary(category => Slugify(category.Name));
         if (records.Select(record => record.CategorySlug).Distinct().Any(slug => !categories.ContainsKey(slug)))
             throw new InvalidOperationException("A source category is missing or inactive; seed cancelled.");
         var ingredientCategories = await db.IngredientCategories.ToDictionaryAsync(category => category.Code);
@@ -88,6 +88,11 @@ internal static class RecipeCatalogSeed
             throw;
         }
     }
+
+    private static string Slugify(string value) => value.Normalize(System.Text.NormalizationForm.FormD)
+        .Where(character => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character) != System.Globalization.UnicodeCategory.NonSpacingMark)
+        .Aggregate(string.Empty, (current, character) => current + (character == 'đ' ? 'd' : character == 'Đ' ? 'd' : char.ToLowerInvariant(character)))
+        .Replace("&", " ").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Aggregate(string.Empty, (current, word) => current.Length == 0 ? word : current + "-" + word);
 
     public static async Task VerifyAivenAsync()
     {

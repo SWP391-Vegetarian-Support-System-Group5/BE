@@ -69,9 +69,8 @@ static class AdminApiTests
                     IsActive = true, IsEmailVerified = true, Profile = new UserProfile { FullName = $"Test {id}" } });
             foreach (var name in new[] { "VEGAN", "VEGETARIAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN" }) db.DietTypes.Add(new DietType { Name = name });
             db.IngredientCategories.AddRange(new IngredientCategory { Code = "PLANT", Name = "Plant", DietaryGroup = "PLANT" }, new IngredientCategory { Code = "DAIRY", Name = "Dairy", DietaryGroup = "DAIRY" });
+            db.RecipeCategories.AddRange(new[] { "Món từ ngũ cốc", "Bánh", "Món ăn sáng", "Bánh mì & bánh kẹp", "Tráng miệng", "Mì", "Salad & món ăn kèm", "Nước sốt", "Ăn nhẹ", "Súp & món hầm" }.Select(name => new RecipeCategory { Name = name, CreatedAt = DateTime.UtcNow }));
             await db.SaveChangesAsync();
-            await BMISchemaUpdate.ApplyAsync(db);
-            await scope.ServiceProvider.GetRequiredService<RecipeCategoryService>().SeedAsync(default);
         }
         await app.StartAsync();
         try
@@ -129,7 +128,6 @@ static class AdminApiTests
                 ("POST","/api/admin/restaurants",new { name="Test", address="Test address" }), ("PUT","/api/admin/restaurants/1",new { name="Test",address="Test address" }), ("DELETE","/api/admin/restaurants/1",null),
                 ("GET","/api/admin/moderation",null), ("GET","/api/admin/moderation/1",null), ("POST","/api/admin/moderation/1/approve",null), ("POST","/api/admin/moderation/1/remove",null),
                 ("POST","/api/recipe-categories",new {name="Test",slug="test",type="CUISINE"}), ("PUT","/api/recipe-categories/1",new {name="Test",slug="test",type="CUISINE"}),
-                ("GET","/api/admin/recipes/bmi-types",null), ("PUT","/api/admin/recipes/1/bmi-types",new {bmiTypeIds=Array.Empty<int>()}),
                 ("PUT","/api/admin/recipes/1/categories",new {categoryIds=Array.Empty<int>()})
             };
             foreach (var route in adminRoutes)
@@ -258,9 +256,7 @@ static class AdminApiTests
             await Send("POST", "/api/admin/ingredient-categories", 400, new {code="BAD",name="Bad",dietaryGroup="MEAT"}, admin);
             await Send("PUT", $"/api/admin/ingredient-categories/{vegetableId}", 200, new {code="VEGETABLES",name="Fresh vegetables",dietaryGroup="PLANT"}, admin);
             await Send("PUT", $"/api/admin/ingredient-categories/{plantId}", 400, new {code="PLANT",name="Plants",dietaryGroup="DAIRY"}, admin);
-            var bmiTypes = await Send("GET", "/api/bmi-types", 200);
-            var bmiId = bmiTypes[0].GetProperty("id").GetInt32();
-            var recipe = await Send("POST", "/api/recipes", 201, new { title="Recipe post",content="Test",recipeName="Tofu dish",imageUrl="https://res.cloudinary.com/test/image/upload/v1/tofu.jpg",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}},steps=new[]{new{stepNumber=1,instruction="Cook"}},bmiTypeIds=new[]{bmiId} }, admin);
+            var recipe = await Send("POST", "/api/recipes", 201, new { title="Recipe post",content="Test",recipeName="Tofu dish",imageUrl="https://res.cloudinary.com/test/image/upload/v1/tofu.jpg",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}},steps=new[]{new{stepNumber=1,instruction="Cook"}} }, admin);
             var recipeId = recipe.GetProperty("postId").GetInt32();
             if (recipe.GetProperty("imageUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image URL was not saved");
             await Send("POST", "/api/recipes", 400, new { title="Bad image",content="Test",recipeName="Tofu dish",imageUrl="http://example.com/tofu.jpg",ingredients=new[]{new{ingredientName="Test tofu",amount="100g",dietaryGroup="PLANT"}} }, admin);
@@ -269,8 +265,6 @@ static class AdminApiTests
             if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
             var grainsId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "mon-tu-ngu-coc").GetProperty("id").GetInt32();
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{grainsId} }, admin);
-            var mappedRecipes = await Send("GET", "/api/admin/recipes/bmi-types", 200, token: admin);
-            if (!mappedRecipes.EnumerateArray().Single(x => x.GetProperty("postId").GetInt32() == recipeId).GetProperty("categoryIds").EnumerateArray().Any(x => x.GetInt32() == grainsId)) throw new Exception("Recipe category assignment did not persist");
             var categoryPosts = await Send("GET", $"/api/posts?category={grainsId}", 200);
             if (!categoryPosts.EnumerateArray().Any(x => x.GetProperty("postId").GetInt32() == recipeId)) throw new Exception("Public recipe category page cannot list the assigned post");
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=Array.Empty<int>() }, admin);
@@ -286,11 +280,6 @@ static class AdminApiTests
             if (updatedPost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Recipe post kept the vegan label after its ingredient became dairy");
             await Send("PUT", $"/api/admin/ingredients/{ingredientId}", 404, new {name="Bad",ingredientCategoryId=9999}, admin);
             await Send("PUT", "/api/admin/ingredients/9999", 404, new {name="Bad",ingredientCategoryId=plantId}, admin);
-            await Send("GET", "/api/admin/recipes/bmi-types", 200, token: admin);
-            await Send("PUT", $"/api/admin/recipes/{recipeId}/bmi-types", 204, new {bmiTypeIds=new[]{bmiId,bmiId}}, admin);
-            await Send("PUT", $"/api/admin/recipes/{recipeId}/bmi-types", 400, new {bmiTypeIds=new[]{9999}}, admin);
-            await Send("PUT", $"/api/admin/recipes/{recipeId}/bmi-types", 204, new {bmiTypeIds=Array.Empty<int>()}, admin);
-            await Send("PUT", "/api/admin/recipes/9999/bmi-types", 404, new {bmiTypeIds=Array.Empty<int>()}, admin);
             Console.WriteLine($"ADMIN API PASS: {checks} HTTP checks; {adminRoutes.Length} admin route definitions checked for guest 401 and user 403. Storage: EF InMemory; zero Aiven writes.");
         }
         finally { await app.StopAsync(); }

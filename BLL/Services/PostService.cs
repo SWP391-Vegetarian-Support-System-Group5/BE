@@ -40,7 +40,6 @@ public class PostService(
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
         if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
-        if (!string.IsNullOrWhiteSpace(categoryType)) { var type = RecipeCategoryService.ValidateType(categoryType); query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.Category.Type == type && m.Category.IsActive)); }
         if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
         query = query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
         if (limit is > 0) query = query.Take(limit.Value);

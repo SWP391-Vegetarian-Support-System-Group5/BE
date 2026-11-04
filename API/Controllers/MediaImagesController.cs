@@ -17,7 +17,9 @@ public class MediaImagesController(IImageStorage images) : ControllerBase
     [HttpPost]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(9L * 1024 * 1024)]
-    public async Task<ActionResult<object>> Upload([FromForm] IFormFile image, [FromQuery] string purpose, CancellationToken ct)
+    // IFormFile is inferred from multipart form data. Do not add [FromForm] directly here:
+    // Swashbuckle cannot generate an OpenAPI operation for that combination.
+    public async Task<ActionResult<object>> Upload(IFormFile image, [FromQuery] string purpose, CancellationToken ct)
     {
         if (!Purposes.Contains(purpose)) throw new ServiceException("Mục đích tải ảnh không hợp lệ.", 400);
         if (purpose != "recipes" && !User.IsInRole("ADMIN")) return Forbid();

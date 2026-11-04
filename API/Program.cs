@@ -210,14 +210,14 @@ if (runDatabaseStartupTasks)
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RecipeCaloriesSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeRestaurantImageSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RestaurantIngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await BirthYearSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
+    await RecipeCaloriesSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await LegacyUnusedSchemaCleanup.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await VideoRecipeDraftSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<ISeedService>().SeedAsync();

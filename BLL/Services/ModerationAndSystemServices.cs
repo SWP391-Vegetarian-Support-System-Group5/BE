@@ -54,7 +54,6 @@ public class SeedService(
     IRepository<RecipeIngredient> recipeIngredients,
     IRepository<RecipeStep> recipeSteps,
     IRepository<RecipeDietCompatibility> recipeDietCompatibilities,
-    RecipeCategoryService recipeCategories,
     IngredientCatalogService ingredientCatalog) : ISeedService
 {
     public async Task SeedAsync(CancellationToken cancellationToken = default)
@@ -69,7 +68,6 @@ public class SeedService(
         }
         // Recipe content is created by users and admins; restarting the API must not recreate sample posts.
         await ingredientCatalog.RefreshCompatibilityAsync(cancellationToken);
-        await recipeCategories.SeedAsync(cancellationToken);
     }
     private static async Task AddMissingAsync<T>(IRepository<T> repository, IEnumerable<string> names, Func<string, T> create, Func<T, string> getName, CancellationToken ct) where T : class
     {

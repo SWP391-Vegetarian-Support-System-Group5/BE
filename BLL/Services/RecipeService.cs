@@ -20,14 +20,12 @@ public class RecipeService(
     RecipeCategoryService recipeCategories,
     IngredientCatalogService ingredientCatalog,
     DAL.Data.VegetarianDbContext db,
-    RecipeBmiService recipeBmi,
     IUserNotificationService? notifications = null) : IRecipeService
 {
     public async Task<RecipeResponse> CreateAsync(int userId, CreateRecipeRequest request, CancellationToken cancellationToken = default, string? role = null)
     {
         ValidateRecipeRequest(request);
         var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
-        await recipeBmi.ValidateAsync(request.BmiTypeIds, userId, cancellationToken);
         await ValidateRelationsAsync(request, cancellationToken);
         // Administrators are the editorial authority: their create/edit actions publish directly.
         // Member-submitted recipes still go through AI moderation below.
@@ -38,10 +36,9 @@ public class RecipeService(
         var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
-        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, VideoUrl = videoUrl, ImageUrl = imageUrl };
+        var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl, ImageUrl = imageUrl };
         await recipes.AddAsync(recipe, cancellationToken);
         await ReplaceDetailsAsync(recipe.PostId, request, cancellationToken);
-        await recipeBmi.SetMappingsAsync(recipe.PostId, request.BmiTypeIds, cancellationToken);
         await recipes.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         var response = await GetAsync(post.PostId, cancellationToken, userId);
@@ -65,7 +62,6 @@ public class RecipeService(
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
-        await recipeBmi.ValidateAsync(request.BmiTypeIds, actorId, cancellationToken);
         await ValidateRelationsAsync(request, cancellationToken);
         // An administrator may correct content directly without routing their work back to AI review.
         var moderationReason = role == "ADMIN" ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
@@ -78,13 +74,12 @@ public class RecipeService(
         foreach (var flag in pendingFlags) flag.Status = "APPROVED";
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
         recipe.RecipeName = request.RecipeName.Trim();
-        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
+        recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
         foreach (var item in recipe.Ingredients) ingredients.Remove(item);
         foreach (var item in recipe.Steps) steps.Remove(item);
         foreach (var item in recipe.DietCompatibilities) dietCompatibilities.Remove(item);
         await recipes.SaveChangesAsync(cancellationToken);
         await ReplaceDetailsAsync(id, request, cancellationToken);
-        await recipeBmi.SetMappingsAsync(id, request.BmiTypeIds, cancellationToken);
         await recipes.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         if (recipe.Post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent(wasPublished ? "postUpdated" : "postCreated", id), cancellationToken);
@@ -107,7 +102,6 @@ public class RecipeService(
         var query = BaseQuery().Where(x => x.Post.Status == "PUBLISHED" && x.Ingredients.Any() && !x.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup == "UNVERIFIED"));
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.RecipeName.ToLower().Contains(term) || x.Post.Title.ToLower().Contains(term) || x.Ingredients.Any(i => i.Ingredient.Name.ToLower().Contains(term))); }
         if (categoryId.HasValue) query = query.Where(x => x.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
-        if (!string.IsNullOrWhiteSpace(categoryType)) { var type = RecipeCategoryService.ValidateType(categoryType); query = query.Where(x => x.CategoryMappings.Any(m => m.Category.Type == type && m.Category.IsActive)); }
         return (await query.OrderByDescending(x => x.PostId).ToListAsync(cancellationToken)).Select(x => ToResponse(x)).ToList();
     }
 
@@ -124,7 +118,7 @@ public class RecipeService(
         foreach (var dietTypeId in compatibleDietTypeIds) await dietCompatibilities.AddAsync(new RecipeDietCompatibility { RecipeId = recipeId, DietTypeId = dietTypeId, IsCompatible = true }, ct);
         await recipeCategories.SetMappingsAsync(recipeId, request.CategoryIds, groups, ct);
     }
-    private IQueryable<Recipe> BaseQuery() => recipes.Query().AsSplitQuery().Include(x => x.Post).ThenInclude(x => x.ModerationFlags).Include(x => x.BMITypes).ThenInclude(x => x.BMIType).Include(x => x.CategoryMappings).ThenInclude(x => x.Category).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).Include(x => x.Steps).Include(x => x.DietCompatibilities);
+    private IQueryable<Recipe> BaseQuery() => recipes.Query().AsSplitQuery().Include(x => x.Post).ThenInclude(x => x.ModerationFlags).Include(x => x.CategoryMappings).ThenInclude(x => x.Category).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).Include(x => x.Steps).Include(x => x.DietCompatibilities);
     private IQueryable<Post> PostBaseQuery() => posts.Query().AsSplitQuery().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments).Include(x => x.Recipe).ThenInclude(x => x!.DietCompatibilities).ThenInclude(x => x.DietType);
     private async Task ValidateRelationsAsync(CreateRecipeRequest request, CancellationToken ct)
     {
@@ -136,7 +130,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), x.BMITypes.Select(m => new BmiTypeResponse(m.BMITypeId, m.BMIType.Code, m.BMIType.Name, m.BMIType.Description)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl);
+    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing);
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,

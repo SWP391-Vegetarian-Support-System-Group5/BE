@@ -21,10 +21,11 @@ public class UserProfile
     public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }
-    public DateTime? BirthDate { get; set; }
+    public int? BirthYear { get; set; }
     public decimal? HeightCm { get; set; }
     public decimal? WeightKg { get; set; }
     public string? ActivityLevel { get; set; }
+    public decimal? GoalWeightKg { get; set; }
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
@@ -113,6 +114,8 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
+    // Calories are an estimate for one serving, never a medical guarantee.
+    public decimal? CaloriesPerServing { get; set; }
     public string? VideoUrl { get; set; }
     public string? ImageUrl { get; set; }
     public Post Post { get; set; } = null!;
@@ -120,7 +123,6 @@ public class Recipe
     public ICollection<RecipeStep> Steps { get; set; } = new List<RecipeStep>();
     public ICollection<RecipeDietCompatibility> DietCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
     public ICollection<RecipeCategoryMapping> CategoryMappings { get; set; } = new List<RecipeCategoryMapping>();
-    public ICollection<RecipeBMIType> BMITypes { get; set; } = new List<RecipeBMIType>();
 }
 
 public class RecipeIngredient
@@ -210,6 +212,10 @@ public class MealPlan
     public DateTime StartDate { get; set; }
     public string? AvailableIngredients { get; set; }
     public decimal? BMI { get; set; }
+    public decimal? Tdee { get; set; }
+    public decimal? TargetCaloriesPerDay { get; set; }
+    public int? CalorieAdjustment { get; set; }
+    public string? NutritionGoal { get; set; }
     public User User { get; set; } = null!;
     public ICollection<MealPlanMeal> Meals { get; set; } = new List<MealPlanMeal>();
 }
@@ -221,6 +227,8 @@ public class MealPlanMeal
     public int DayNumber { get; set; }
     public string MealType { get; set; } = null!;
     public int RecipeId { get; set; }
+    // Snapshot used to preserve the estimate shown when this plan was generated.
+    public decimal? PlannedCalories { get; set; }
     public MealPlan MealPlan { get; set; } = null!;
     public Recipe Recipe { get; set; } = null!;
 }
@@ -258,6 +266,7 @@ public class VideoRecipeDraft
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

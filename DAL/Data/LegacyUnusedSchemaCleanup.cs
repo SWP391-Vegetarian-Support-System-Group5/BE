@@ -28,6 +28,8 @@ public static class LegacyUnusedSchemaCleanup
         }
         await DropColumnsAsync(db, "Restaurants", ["DietTypeId"], ct);
         await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS `UserNotifications`", ct);
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS `RecipeBMITypes`", ct);
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS `BMITypes`", ct);
     }
 
     private static async Task DropColumnsAsync(VegetarianDbContext db, string table, IReadOnlyCollection<string> columns, CancellationToken ct)

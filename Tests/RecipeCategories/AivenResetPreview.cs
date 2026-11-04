@@ -1,17 +1,20 @@
 using MySqlConnector;
-using BLL.Services;
+using DAL.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 internal static class AivenResetPreview
 {
     private static readonly string[] EmptyTables =
     [
         "Bookmarks", "ChatMessages", "ChatSessions", "Comments", "EmailOtpCodes", "Ingredients",
-        "MealPlanMeals", "MealPlans", "ModerationFlags", "PostRatings", "Posts", "RecipeBMITypes",
+        "MealPlanMeals", "MealPlans", "ModerationFlags", "PostRatings", "Posts",
         "RecipeCategories", "RecipeCategoryMappings", "RecipeDietCompatibility", "RecipeIngredients",
         "RecipeSteps", "Recipes", "RestaurantDietTypes", "RestaurantFoods", "RestaurantIngredients",
         "Restaurants", "UserAllergens", "VideoRecipeDraftIngredients", "VideoRecipeDraftSteps", "VideoRecipeDrafts"
     ];
-    private static readonly string[] SystemTables = ["Allergens", "BMITypes", "DietTypes", "IngredientCategories", "UserProfiles", "Users", "__EFMigrationsHistory"];
+    private static readonly string[] SystemTables = ["Allergens", "DietTypes", "IngredientCategories", "UserProfiles", "Users", "__EFMigrationsHistory"];
+    private static readonly string[] DefaultRecipeCategoryNames = ["Món từ ngũ cốc", "Bánh", "Món ăn sáng", "Bánh mì & bánh kẹp", "Tráng miệng", "Mì", "Salad & món ăn kèm", "Nước sốt", "Ăn nhẹ", "Súp & món hầm"];
 
     private static async Task<MySqlConnection> OpenAsync()
     {
@@ -53,6 +56,48 @@ internal static class AivenResetPreview
         Console.WriteLine("Preview only: no data was changed.");
     }
 
+    public static async Task AuditSchemaAsync()
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        var actualTables = await TablesAsync(command);
+        var contextConnectionOptions = new MySqlConnectionStringBuilder(connection.ConnectionString)
+        {
+            AllowUserVariables = true,
+            UseAffectedRows = false
+        };
+        var options = new DbContextOptionsBuilder<VegetarianDbContext>()
+            .UseMySql(contextConnectionOptions.ConnectionString, new MySqlServerVersion(new Version(8, 0, 0))).Options;
+        await using var db = new VegetarianDbContext(options);
+        var expected = db.Model.GetEntityTypes()
+            .Where(entity => !entity.IsOwned() && entity.GetTableName() is not null)
+            .GroupBy(entity => entity.GetTableName()!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.SelectMany(entity => entity.GetProperties()
+                .Select(property => property.GetColumnName(StoreObjectIdentifier.Table(group.Key, entity.GetSchema())) ?? property.Name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+
+        var systemTables = new HashSet<string>(["__EFMigrationsHistory"], StringComparer.OrdinalIgnoreCase);
+        var extraTables = actualTables.Where(table => !systemTables.Contains(table) && !expected.ContainsKey(table)).ToArray();
+        var missingTables = expected.Keys.Where(table => !actualTables.Contains(table, StringComparer.OrdinalIgnoreCase)).ToArray();
+        Console.WriteLine("Extra tables: " + (extraTables.Length == 0 ? "none" : string.Join(", ", extraTables)));
+        Console.WriteLine("Missing mapped tables: " + (missingTables.Length == 0 ? "none" : string.Join(", ", missingTables)));
+
+        foreach (var table in actualTables.Where(expected.ContainsKey).OrderBy(table => table))
+        {
+            command.CommandText = "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=@table ORDER BY ORDINAL_POSITION";
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("@table", table);
+            var actualColumns = new List<string>();
+            await using (var reader = await command.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) actualColumns.Add(reader.GetString(0));
+            var extraColumns = actualColumns.Where(column => !expected[table].Contains(column)).ToArray();
+            var missingColumns = expected[table].Where(column => !actualColumns.Contains(column, StringComparer.OrdinalIgnoreCase)).ToArray();
+            if (extraColumns.Length > 0 || missingColumns.Length > 0)
+                Console.WriteLine($"{table}: extra=[{string.Join(", ", extraColumns)}]; missing=[{string.Join(", ", missingColumns)}]");
+        }
+        Console.WriteLine("Audit only: no data or schema was changed.");
+    }
+
     public static async Task RemoveDietaryCategoriesAsync()
     {
         await using var connection = await OpenAsync();
@@ -77,6 +122,71 @@ internal static class AivenResetPreview
         if (Convert.ToInt32(await command.ExecuteScalarAsync()) != 0) throw new InvalidOperationException("Dietary categories remain; deletion cancelled.");
         await transaction.CommitAsync();
         Console.WriteLine($"Removed {removed} dietary recipe categories. DietTypes and RecipeDietCompatibility retained.");
+    }
+
+    public static async Task AuditRecipeCategoriesAsync()
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT c.Id, c.Name, COUNT(DISTINCT m.RecipeId) AS RecipeCount
+            FROM RecipeCategories c
+            LEFT JOIN RecipeCategoryMappings m ON m.CategoryId = c.Id
+            GROUP BY c.Id, c.Name
+            ORDER BY c.Name
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        var total = 0;
+        var empty = 0;
+        while (await reader.ReadAsync())
+        {
+            total++;
+            var recipeCount = reader.GetInt32(2);
+            if (recipeCount == 0) empty++;
+            Console.WriteLine($"{reader.GetInt32(0)} | {reader.GetString(1)} | recipes={recipeCount}");
+        }
+        Console.WriteLine($"Recipe categories: {total}; empty categories: {empty}. Audit only: no data was changed.");
+    }
+
+    public static async Task RemoveEmptyRecipeCategoriesAsync(string confirmation)
+    {
+        if (confirmation != "REMOVE_EMPTY_RECIPE_CATEGORIES_1")
+            throw new InvalidOperationException("Explicit empty-category cleanup confirmation is required.");
+
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DATABASE()";
+        if ((string?)await command.ExecuteScalarAsync() != "VegetarianSupportSystemDB")
+            throw new InvalidOperationException("Unexpected database; deletion cancelled.");
+
+        command.CommandText = """
+            SELECT c.Id, c.Name FROM RecipeCategories c
+            LEFT JOIN RecipeCategoryMappings m ON m.CategoryId = c.Id
+            WHERE m.RecipeId IS NULL
+            ORDER BY c.Id
+            """;
+        var candidates = new List<(int Id, string Name)>();
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) candidates.Add((reader.GetInt32(0), reader.GetString(1)));
+        if (candidates.Count == 0)
+        {
+            Console.WriteLine("No empty recipe categories found.");
+            return;
+        }
+
+        await using var transaction = await connection.BeginTransactionAsync();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE c FROM RecipeCategories c
+            LEFT JOIN RecipeCategoryMappings m ON m.CategoryId = c.Id
+            WHERE m.RecipeId IS NULL
+            """;
+        var removed = await command.ExecuteNonQueryAsync();
+        command.CommandText = "SELECT COUNT(*) FROM RecipeCategories c LEFT JOIN RecipeCategoryMappings m ON m.CategoryId = c.Id WHERE m.RecipeId IS NULL";
+        if (Convert.ToInt32(await command.ExecuteScalarAsync()) != 0)
+            throw new InvalidOperationException("Empty category verification failed; transaction cancelled.");
+        await transaction.CommitAsync();
+        Console.WriteLine($"Removed {removed} empty recipe categories: {string.Join(", ", candidates.Select(candidate => candidate.Name))}.");
     }
 
     public static async Task ResetAsync(string confirmation)
@@ -116,15 +226,11 @@ internal static class AivenResetPreview
             command.CommandText = "DELETE FROM Allergens WHERE Name NOT IN ('Peanut','Milk','Egg','Soy','Gluten','Tree Nut')";
             await command.ExecuteNonQueryAsync();
 
-            command.CommandText = "INSERT INTO RecipeCategories (Name, Slug, Type, Description, ImageUrl, IsActive, CreatedAt) VALUES (@name, @slug, @type, NULL, NULL, TRUE, UTC_TIMESTAMP())";
+            command.CommandText = "INSERT INTO RecipeCategories (Name, IsActive, CreatedAt) VALUES (@name, TRUE, UTC_TIMESTAMP())";
             var name = command.Parameters.Add("@name", MySqlDbType.VarChar);
-            var slug = command.Parameters.Add("@slug", MySqlDbType.VarChar);
-            var type = command.Parameters.Add("@type", MySqlDbType.VarChar);
-            foreach (var category in RecipeCategoryService.DefaultCategories)
+            foreach (var categoryName in DefaultRecipeCategoryNames)
             {
-                name.Value = category.Name;
-                slug.Value = category.Slug;
-                type.Value = category.Type;
+                name.Value = categoryName;
                 await command.ExecuteNonQueryAsync();
             }
             command.Parameters.Clear();
@@ -137,7 +243,7 @@ internal static class AivenResetPreview
             command.CommandText = "SELECT COUNT(*) FROM Users WHERE Role = 'ADMIN' AND UserId = 1";
             if (Convert.ToInt32(await command.ExecuteScalarAsync()) != 1) throw new InvalidOperationException("Admin account changed; reset cancelled.");
             command.CommandText = "SELECT COUNT(*) FROM RecipeCategories";
-            if (Convert.ToInt32(await command.ExecuteScalarAsync()) != RecipeCategoryService.DefaultCategories.Count)
+            if (Convert.ToInt32(await command.ExecuteScalarAsync()) != DefaultRecipeCategoryNames.Length)
                 throw new InvalidOperationException("Category seed incomplete; reset cancelled.");
             await transaction.CommitAsync();
             Console.WriteLine("Reset complete: admin UserId=1 and system reference tables retained; 10 menu categories seeded.");
