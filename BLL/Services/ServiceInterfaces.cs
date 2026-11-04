@@ -174,5 +174,4 @@ public interface IModerationService
     Task ReviewAsync(int id, int adminId, bool removeContent, CancellationToken cancellationToken = default);
 }
 
-public interface ISeedService { Task SeedAsync(CancellationToken cancellationToken = default); }
 public interface IHealthService { Task<bool> CanConnectAsync(CancellationToken cancellationToken = default); }

@@ -226,11 +226,10 @@ if (runDatabaseStartupTasks)
     await RecipeCaloriesSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await LegacyUnusedSchemaCleanup.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await VideoRecipeDraftSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await services.GetRequiredService<ISeedService>().SeedAsync();
 }
 else
 {
-    Console.WriteLine("Startup migration, seed, and the video-processing worker are disabled. API database access remains enabled.");
+    Console.WriteLine("Startup migration and the video-processing worker are disabled. API database access remains enabled.");
 }
 
 app.Run();

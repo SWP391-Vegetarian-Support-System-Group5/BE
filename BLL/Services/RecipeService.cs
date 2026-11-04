@@ -111,7 +111,7 @@ public class RecipeService(
         var groups = recipeIngredients.Select(x => x.Ingredient.Category.DietaryGroup).ToArray();
         var compatibleDietTypeNames = VegetarianDietRules.GetCompatibleDietTypes(groups);
         var compatibleDietTypeIds = await dietTypes.Query().Where(x => compatibleDietTypeNames.Contains(x.Name)).Select(x => x.DietTypeId).ToListAsync(ct);
-        if (compatibleDietTypeIds.Count != compatibleDietTypeNames.Count) throw new ServiceException("Diet type configuration is incomplete. Restart the API to seed the supported diet types.", 500);
+        if (compatibleDietTypeIds.Count != compatibleDietTypeNames.Count) throw new ServiceException("Diet type configuration is incomplete. Configure the supported diet types before creating a recipe.", 500);
 
         foreach (var ingredient in recipeIngredients) await ingredients.AddAsync(new RecipeIngredient { RecipeId = recipeId, IngredientId = ingredient.Ingredient.IngredientId, Amount = ingredient.Amount }, ct);
         foreach (var step in request.Steps ?? []) await steps.AddAsync(new RecipeStep { RecipeId = recipeId, StepNumber = step.StepNumber, Instruction = step.Instruction.Trim() }, ct);

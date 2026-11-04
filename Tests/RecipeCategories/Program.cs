@@ -56,18 +56,6 @@ if (args.Contains("--remove-empty-recipe-categories-aiven"))
     return;
 }
 
-if (args.Contains("--seed-recipe-catalog-aiven"))
-{
-    await RecipeCatalogSeed.ApplyAivenAsync(args.FirstOrDefault(value => value.StartsWith("--confirm="))?.Split('=', 2)[1] ?? "");
-    return;
-}
-
-if (args.Contains("--verify-recipe-catalog-aiven"))
-{
-    await RecipeCatalogSeed.VerifyAivenAsync();
-    return;
-}
-
 if (args.Contains("--drop-recipe-calories-aiven"))
 {
     await RecipeCaloriesSchemaUpdate.ApplyAivenAsync();
