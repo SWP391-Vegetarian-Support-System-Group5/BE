@@ -112,6 +112,13 @@ builder.Services.AddHttpClient("Nominatim", client =>
     client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
 });
+builder.Services.AddHttpClient("OSRM", client =>
+{
+    client.BaseAddress = new Uri("https://router.project-osrm.org/");
+    client.Timeout = TimeSpan.FromSeconds(12);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
+});
+builder.Services.AddScoped<IRestaurantRouteService, RestaurantRouteService>();
 builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiChatbotService>>()));
 builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing") });
@@ -222,6 +229,7 @@ if (runDatabaseStartupTasks)
     await RestaurantIngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BirthYearSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
+    await UserLivingAddressSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
     await RecipeCaloriesSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await LegacyUnusedSchemaCleanup.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());

@@ -127,6 +127,7 @@ public class AuthService(
         user.Profile?.DietTypeId,
         user.Profile?.Latitude,
         user.Profile?.Longitude,
+        user.Profile?.LivingAddress,
         user.IsActive,
         user.CreatedAt,
         user.IsEmailVerified,

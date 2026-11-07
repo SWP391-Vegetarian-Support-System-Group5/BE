@@ -13,7 +13,7 @@ public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Requ
 public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
-public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null);
+public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, string? LivingAddress, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null);
 public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
@@ -25,12 +25,14 @@ public record UpdateUserProfileRequest(
     int? DietTypeId,
     [Range(-90, 90)] decimal? Latitude,
     [Range(-180, 180)] decimal? Longitude,
+    [MaxLength(300)] string? LivingAddress = null,
     [Range(1, 1000)] decimal? GoalWeightKg = null);
 public record UpdateUserLocationRequest(
     [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-90, 90)] decimal Latitude,
     [property: System.Text.Json.Serialization.JsonRequired]
-    [Range(-180, 180)] decimal Longitude);
+    [Range(-180, 180)] decimal Longitude,
+    [property: MaxLength(300)] string? LivingAddress = null);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
@@ -43,6 +45,8 @@ public record ProvinceResponse(string Code, string Name, string Type, decimal? L
 public record AreaResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);
 public record RestaurantRequest([Required, MaxLength(200)] string Name, [Required, MaxLength(300)] string Address, decimal? Latitude, decimal? Longitude, List<int>? DietTypeIds, List<string>? Foods, List<int>? IngredientIds = null, [MaxLength(1000)] string? ImageUrl = null);
 public record RestaurantResponse(int RestaurantId, string Name, string Address, decimal? Latitude, decimal? Longitude, IReadOnlyCollection<int> DietTypeIds, IReadOnlyCollection<string> Foods, IReadOnlyCollection<int> IngredientIds, IReadOnlyCollection<string> IngredientNames, string? ImageUrl = null);
+public record RestaurantRoutePointResponse(decimal Latitude, decimal Longitude);
+public record RestaurantRouteResponse(decimal DistanceKm, int DurationMinutes, IReadOnlyCollection<RestaurantRoutePointResponse> Coordinates);
 public record CreatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl);
 public record UpdatePostRequest([Required, MaxLength(250)] string Title, [Required] string Content, [Required] string PostType, string? VideoUrl, string? Status);
 public record PostDietTypeResponse(int Id, string Name);

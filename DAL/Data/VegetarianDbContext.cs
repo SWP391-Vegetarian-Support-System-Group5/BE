@@ -107,6 +107,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.GoalWeightKg).HasPrecision(6, 2);
             entity.Property(x => x.Latitude).HasPrecision(9, 6);
             entity.Property(x => x.Longitude).HasPrecision(9, 6);
+            entity.Property(x => x.LivingAddress).HasMaxLength(300);
             entity.HasOne(x => x.DietType).WithMany(x => x.UserProfiles).HasForeignKey(x => x.DietTypeId).OnDelete(DeleteBehavior.NoAction);
         });
 

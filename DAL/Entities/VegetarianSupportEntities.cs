@@ -29,6 +29,7 @@ public class UserProfile
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
+    public string? LivingAddress { get; set; }
     public User User { get; set; } = null!;
     public DietType? DietType { get; set; }
 }

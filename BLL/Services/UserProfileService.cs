@@ -31,6 +31,7 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
         profile.DietTypeId = request.DietTypeId;
         profile.Latitude = request.Latitude;
         profile.Longitude = request.Longitude;
+        profile.LivingAddress = string.IsNullOrWhiteSpace(request.LivingAddress) ? null : request.LivingAddress.Trim();
         profile.User.UpdatedAt = DateTime.UtcNow;
         await profiles.SaveChangesAsync(cancellationToken);
         return AuthService.ToResponse(profile.User);
@@ -43,6 +44,7 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
 
         profile.Latitude = request.Latitude;
         profile.Longitude = request.Longitude;
+        if (!string.IsNullOrWhiteSpace(request.LivingAddress)) profile.LivingAddress = request.LivingAddress.Trim();
         profile.User.UpdatedAt = DateTime.UtcNow;
         await profiles.SaveChangesAsync(cancellationToken);
         return AuthService.ToResponse(profile.User);

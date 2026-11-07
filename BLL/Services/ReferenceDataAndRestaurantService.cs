@@ -46,10 +46,16 @@ public class ReferenceDataAndRestaurantService(
         await DeleteAsync(allergens, id, cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? food, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? keyword, CancellationToken cancellationToken = default)
     {
         var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).AsQueryable();
-        if (!string.IsNullOrWhiteSpace(food)) { var term = food.Trim().ToLower(); query = query.Where(x => x.Name.ToLower().Contains(term) || x.Foods.Any(f => f.FoodName.ToLower().Contains(term))); }
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            var term = keyword.Trim().ToLower();
+            query = query.Where(x => x.Name.ToLower().Contains(term)
+                || x.Foods.Any(f => f.FoodName.ToLower().Contains(term))
+                || x.Ingredients.Any(i => i.Ingredient.Name.ToLower().Contains(term)));
+        }
         return (await query.OrderBy(x => x.Name).ToListAsync(cancellationToken)).Select(ToRestaurant).ToList();
     }
     public async Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default)
@@ -57,7 +63,7 @@ public class ReferenceDataAndRestaurantService(
         var entity = await restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).SingleOrDefaultAsync(x => x.RestaurantId == id, cancellationToken);
         return entity is null ? null : ToRestaurant(entity);
     }
-    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? ingredient = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? keyword = null, CancellationToken cancellationToken = default)
     {
         if (radiusKm <= 0) throw new ServiceException("Radius must be greater than zero.");
         if (dietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken))
@@ -67,10 +73,12 @@ public class ReferenceDataAndRestaurantService(
             .Where(x => x.Latitude.HasValue && x.Longitude.HasValue);
         if (dietTypeId.HasValue)
             query = query.Where(x => x.DietTypes.Any(item => item.DietTypeId == dietTypeId.Value));
-        if (!string.IsNullOrWhiteSpace(ingredient))
+        if (!string.IsNullOrWhiteSpace(keyword))
         {
-            var term = ingredient.Trim();
-            query = query.Where(x => x.Ingredients.Any(item => item.Ingredient.Name.Contains(term)));
+            var term = keyword.Trim().ToLower();
+            query = query.Where(x => x.Name.ToLower().Contains(term)
+                || x.Foods.Any(item => item.FoodName.ToLower().Contains(term))
+                || x.Ingredients.Any(item => item.Ingredient.Name.ToLower().Contains(term)));
         }
         var candidates = await query.ToListAsync(cancellationToken);
         return candidates.Where(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value) <= radiusKm).OrderBy(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value)).Select(ToRestaurant).ToList();
