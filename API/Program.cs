@@ -6,6 +6,7 @@ using DAL.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.EntityFrameworkCore;
@@ -166,8 +167,27 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
+// Render terminates TLS at its load balancer and forwards requests to Kestrel
+// over HTTP. Trust those forwarded headers so generated OpenAPI URLs retain
+// the browser-facing HTTPS scheme and host.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                               ForwardedHeaders.XForwardedProto |
+                               ForwardedHeaders.XForwardedHost;
+    // The container is reachable through Render's proxy, whose IP addresses
+    // are not static. Render does not expose Kestrel directly to the public.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.Services.AddSwaggerGen(options =>
 {
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "VeggieMate API",
+        Version = "v1",
+        Description = "VeggieMate backend API"
+    });
     options.TagActionsBy(api =>
     {
         var controller = (api.ActionDescriptor as ControllerActionDescriptor)?.ControllerName;
@@ -195,9 +215,30 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+// Must run before Swagger/redirect/authentication so ASP.NET Core sees the
+// original public HTTPS URL instead of Render's internal HTTP hop.
+app.UseForwardedHeaders();
 app.UseMiddleware<ApiExceptionMiddleware>();
-var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue("Swagger:Enabled", false);
-if (swaggerEnabled) { app.UseSwagger(); app.UseSwaggerUI(); }
+var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue("Swagger:Enabled", true);
+if (swaggerEnabled)
+{
+    app.UseSwagger(options =>
+    {
+        options.PreSerializeFilters.Add((document, request) =>
+        {
+            var scheme = request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? request.Scheme;
+            var host = request.Headers["X-Forwarded-Host"].FirstOrDefault() ?? request.Host.Value;
+            document.Servers = [new OpenApiServer { Url = $"{scheme}://{host}{request.PathBase}" }];
+        });
+    });
+    app.UseSwaggerUI(options =>
+    {
+        options.RoutePrefix = "swagger";
+        // A relative URL works with Render's HTTPS proxy and with local hosts.
+        options.SwaggerEndpoint("./v1/swagger.json", "VeggieMate API v1");
+        options.DocumentTitle = "VeggieMate API Documentation";
+    });
+}
 // Render terminates HTTPS at its proxy. Redirect only for local/non-production hosting.
 if (!app.Environment.IsProduction()) app.UseHttpsRedirection();
 app.UseRouting();
