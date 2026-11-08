@@ -110,7 +110,11 @@ builder.Services.AddHttpClient("OSRM", client =>
 builder.Services.AddScoped<IRestaurantRouteService, RestaurantRouteService>();
 builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiChatbotService>>()));
-builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing") });
+builder.Services.AddSingleton(new VideoRecipeSettings
+{
+    StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing"),
+    PollIntervalSeconds = Math.Clamp(builder.Configuration.GetValue("VideoRecipe:PollIntervalSeconds", 30), 10, 300)
+});
 builder.Services.AddSingleton<LocalVideoStorage>();
 builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiVideoRecipeAnalyzer>>()));
 // Video analysis is an application feature, independent from database schema maintenance.

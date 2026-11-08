@@ -16,6 +16,10 @@ public sealed class VideoRecipeSettings
     public string StorageDirectory { get; init; } = Path.Combine(AppContext.BaseDirectory, ".local", "video-processing");
     public long MaximumFileSizeBytes { get; init; } = 100 * 1024 * 1024;
     public int ProcessingTimeoutSeconds { get; init; } = 900;
+    // Background polling only discovers drafts; it does not process the video
+    // itself. A modest interval avoids continuously hitting the database when
+    // no draft is waiting, especially on small hosted instances.
+    public int PollIntervalSeconds { get; init; } = 30;
 }
 
 public interface IVideoRecipeAnalyzer
