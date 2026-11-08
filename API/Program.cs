@@ -18,19 +18,7 @@ using CloudinaryDotNet;
 var builder = WebApplication.CreateBuilder(args);
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".aiven.env"));
-var runDatabaseStartupTasks = builder.Configuration.GetValue("Database:RunStartupTasks", true);
 const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
-
-if (!runDatabaseStartupTasks)
-{
-    // Database-disabled development mode must not depend on Windows Event Log or persisted keys.
-    builder.Logging.ClearProviders();
-    builder.Logging.AddConsole();
-    var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, ".local", "DataProtection-Keys"));
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(keyDirectory)
-        .SetApplicationName("VegetarianSupportSystem.Local");
-}
 
 builder.Services.Configure<FormOptions>(options =>
 {
@@ -124,7 +112,8 @@ builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(
 builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing") });
 builder.Services.AddSingleton<LocalVideoStorage>();
 builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiVideoRecipeAnalyzer>>()));
-if (runDatabaseStartupTasks) builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
+// Video analysis is an application feature, independent from database schema maintenance.
+builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
 builder.Services.AddSingleton<IKnowledgeBaseService>(_ => new LocalKnowledgeBaseService(Path.Combine(AppContext.BaseDirectory, "KnowledgeBase")));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender>(provider => new SendGridEmailSender(
@@ -209,35 +198,13 @@ var app = builder.Build();
 app.UseMiddleware<ApiExceptionMiddleware>();
 var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue("Swagger:Enabled", false);
 if (swaggerEnabled) { app.UseSwagger(); app.UseSwaggerUI(); }
-if (runDatabaseStartupTasks) app.UseHttpsRedirection();
-app.UseStaticFiles();
+// Render terminates HTTPS at its proxy. Redirect only for local/non-production hosting.
+if (!app.Environment.IsProduction()) app.UseHttpsRedirection();
 app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
-
-if (runDatabaseStartupTasks)
-{
-    using var scope = app.Services.CreateScope();
-    var services = scope.ServiceProvider;
-    await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RecipeRestaurantImageSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RestaurantIngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RestaurantDietTypeSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await BirthYearSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await UserLivingAddressSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
-    await RecipeCaloriesSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await LegacyUnusedSchemaCleanup.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await VideoRecipeDraftSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-}
-else
-{
-    Console.WriteLine("Startup migration and the video-processing worker are disabled. API database access remains enabled.");
-}
 
 app.Run();
