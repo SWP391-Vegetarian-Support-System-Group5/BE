@@ -32,6 +32,10 @@ public record UpdateUserLocationRequest(
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
+public record AddCustomAllergenRequest([Required, MinLength(2), MaxLength(80)] string Name);
+public record RejectAllergenSubmissionRequest([Required, MaxLength(1000)] string Reason);
+public record AllergenSubmissionResponse(int Id, int UserId, string SubmittedName, string Name, string Status,
+    string Message, string? RejectionReason, int? AllergenId, DateTime CreatedAt, DateTime? ReviewedAt, int? ReviewedByUserId);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
 public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups);
 public record AllergenRequest([Required, MaxLength(150)] string Name);

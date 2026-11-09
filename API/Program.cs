@@ -78,6 +78,11 @@ var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudNam
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
+builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(40);
+});
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
 builder.Services.AddSingleton(sendGridSettings);
 builder.Services.AddHttpClient("Gemini", client =>
@@ -171,7 +176,7 @@ builder.Services.AddSwaggerGen(options =>
             "MealPlans" => "Meal Planner",
             "Chat" or "AiFeatures" or "VideoRecipeDrafts" => "AI Assistant",
             "Reports" => "Moderation",
-            "Administration" => "Administration",
+            "Administration" or "AllergenReview" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
             "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
@@ -206,6 +211,7 @@ if (runDatabaseStartupTasks)
     await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
+    await AllergenSubmissionSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
     await services.GetRequiredService<ISeedService>().SeedAsync();
 }
 else

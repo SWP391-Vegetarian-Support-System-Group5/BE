@@ -8,6 +8,13 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--allergen-review"))
+{
+    await CustomAllergenTests.RunAsync();
+    await AdminApiTests.RunAsync(allergensOnly: true);
+    return;
+}
+
 if (args.Contains("--admin-api"))
 {
     await AdminApiTests.RunAsync();
