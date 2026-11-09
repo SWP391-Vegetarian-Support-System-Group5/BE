@@ -12,8 +12,8 @@ validation, exception middleware and signed JWTs obtained through the actual
 login endpoint. Its EF InMemory database is unique per run. It does not read
 the application's env files, contact Aiven, send email, or call AI services.
 
-Coverage: all 23 current admin-only method/route definitions in
-AdministrationController, RecipeCategoriesController and RecipeBmiController.
+Coverage: the 25 admin-only method/route definitions listed in the runner,
+including AdministrationController and RecipeCategoriesController.
 Each rejects guests with 401 and authenticated USER accounts with 403.
 Successful ADMIN operations and relevant validation/not-found paths are checked:
 
@@ -23,13 +23,19 @@ Successful ADMIN operations and relevant validation/not-found paths are checked:
 - Restaurants: create/read/update/delete, food replacement/deduplication, invalid diet.
 - Moderation: list/detail, approve, remove post/comment, missing report rejection.
 - Ingredients: update shared ingredient and verify the recipe reflects its group.
-- Recipe categories: create/update/deactivate, duplicate/type validation,
+- Recipe categories: create/update/deactivate, duplicate-name and blank/oversized-name validation,
   public active-only vs admin include-inactive visibility.
-- BMI: admin recipe create, list assignments, update/deduplicate/clear,
-  invalid group and missing recipe rejection.
 
-At completion the suite reports 113 HTTP checks. Failures throw and return a
-nonzero exit code. The database disappears with the process.
+Restaurant reference endpoints require `IRestaurantRouteService` when their
+controller is constructed. The runner registers a stub that fails if routing is
+actually called, so these checks cannot contact an external route provider.
+Recipe category requests follow the current name/active contract; they do not
+expect the removed slug/type fields. A failing `--admin-api` run prints
+`ADMIN API FAIL` and exits with code 1 instead of leaving an unhandled exception
+for the Windows Just-In-Time debugger.
+
+At completion the suite reports 147 HTTP checks. Failures are printed to stderr
+and return exit code 1. The database disappears with the process.
 
 Regression fixed during this audit: DeleteCommentAsync used FindAsync without
 loading User/Profile. Building the commentRemoved payload dereferenced User and

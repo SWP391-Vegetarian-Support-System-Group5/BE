@@ -8,15 +8,34 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--apply-allergen-review-schema") || args.Contains("--verify-allergen-review-schema"))
+{
+    try { await AllergenReviewSchema.RunAsync(args.Contains("--apply-allergen-review-schema")); }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine($"Allergen review schema operation failed ({error.GetType().Name}). No credentials are printed.");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 if (args.Contains("--birth-year"))
 {
     await BirthYearTests.RunAsync();
     return;
 }
 
-if (args.Contains("--admin-api"))
+if (args.Contains("--admin-api") || args.Contains("--allergen-review"))
 {
-    await AdminApiTests.RunAsync();
+    try
+    {
+        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"));
+    }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine($"ADMIN API FAIL: {error}");
+        Environment.ExitCode = 1;
+    }
     return;
 }
 
@@ -223,9 +242,17 @@ var veganDietId = await db.DietTypes.Where(x => x.Name == "VEGAN").Select(x => x
 Check(reclassified.CompatibleDietTypeIds.Contains(veganDietId), "shared category edit refreshes planner compatibility");
 Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared ingredient edit publishes recipe refresh event");
 
-await NotificationTests.RunAsync();
-await CustomAllergenTests.RunAsync();
-await GeminiReviewTests.RunAsync();
+try
+{
+    await NotificationTests.RunAsync();
+    await CustomAllergenTests.RunAsync();
+    await GeminiReviewTests.RunAsync();
+}
+catch (Exception error)
+{
+    Console.Error.WriteLine($"BUSINESS TEST FAIL: {error}");
+    Environment.ExitCode = 1;
+}
 
 sealed class TestEvents : ICommunityEventPublisher
 {
