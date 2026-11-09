@@ -12,6 +12,7 @@ public static class BusinessLogicRegistration
         services.AddScoped<IUserAdministrationService, UserAdministrationService>();
         services.AddScoped<IUserAllergenService, UserAllergenService>();
         services.AddScoped<IUserProfileService, UserProfileService>();
+        services.AddScoped<UserAvatarService>();
         services.AddSingleton<ILocationService, VietnamLocationService>();
         services.AddScoped<IReferenceDataAndRestaurantService, ReferenceDataAndRestaurantService>();
         services.AddScoped<IPostService, PostService>();

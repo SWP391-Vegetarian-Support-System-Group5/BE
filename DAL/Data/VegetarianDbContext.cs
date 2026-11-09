@@ -98,6 +98,8 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<UserProfile>(entity =>
         {
             entity.ToTable("UserProfiles");
+            entity.Property(x => x.AvatarUrl).HasMaxLength(1000);
+            entity.Property(x => x.AvatarPublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.UserId);
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);

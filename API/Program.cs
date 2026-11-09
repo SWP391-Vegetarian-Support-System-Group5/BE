@@ -54,6 +54,7 @@ builder.Services.AddSingleton(cloudinarySettings);
 var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
 builder.Services.AddScoped<IImageStorage, CloudinaryImageStorage>();
+builder.Services.AddScoped<IAvatarImageStorage, CloudinaryAvatarStorage>();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
@@ -200,7 +201,7 @@ builder.Services.AddSwaggerGen(options =>
         {
             "Authentication" => "Authentication",
             "Health" => "System Health",
-            "CurrentUser" => "My Profile",
+            "CurrentUser" or "Avatar" => "My Profile",
             "Posts" or "Comments" => "Community",
             "Recipes" => "Recipes",
             "MealPlans" => "Meal Planner",

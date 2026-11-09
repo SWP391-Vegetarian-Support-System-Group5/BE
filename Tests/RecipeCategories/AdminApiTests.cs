@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool allergensOnly = false, bool locationOnly = false)
+    public static async Task RunAsync(bool allergensOnly = false, bool locationOnly = false, bool avatarOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -50,6 +50,7 @@ static class AdminApiTests
         builder.Services.AddSingleton<IOpenStreetMapService, TestMap>();
         builder.Services.AddSingleton<IRestaurantRouteService, TestRoute>();
         builder.Services.AddSingleton<IImageStorage, TestImageStorage>();
+        builder.Services.AddSingleton<IAvatarImageStorage, TestAvatarStorage>();
         builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
         builder.Services.AddControllers().AddApplicationPart(typeof(AdministrationController).Assembly);
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -108,6 +109,12 @@ static class AdminApiTests
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
+            if (avatarOnly)
+            {
+                await AvatarApiTests.RunAsync(client, user, admin);
+                await AvatarServiceTests.RunAsync();
+                return;
+            }
             if (locationOnly)
             {
                 await LocationApiTests.RunAsync(client, user);

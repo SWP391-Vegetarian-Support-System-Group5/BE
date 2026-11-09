@@ -10,7 +10,6 @@ public static class LegacyUnusedSchemaCleanup
         if (!db.Database.IsMySql()) return;
 
         await DropColumnsAsync(db, "Posts", ["ImageUrl", "ImagePublicId"], ct);
-        await DropColumnsAsync(db, "UserProfiles", ["AvatarUrl", "AvatarPublicId"], ct);
         await DropColumnsAsync(db, "MealPlanMeals", ["ImageUrl", "ImagePublicId", "ImageIsGenerated", "ImageGenerationStatus", "ImageGenerationError", "ImageGenerationToken", "ImageGenerationLeaseUntil"], ct);
 
         // The old one-to-one diet type is superseded by RestaurantDietTypes.
