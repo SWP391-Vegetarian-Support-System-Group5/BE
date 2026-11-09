@@ -68,6 +68,14 @@ static class AllergenReviewApiTests
         Check((await Send("GET", "/api/users/me/allergens", 200, token: user)).GetProperty("allergens").GetArrayLength() == 0, "Approval does not silently change user selection");
         await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = new[] { allergenId } }, user);
         Check((await Send("GET", "/api/users/me/allergens", 200, token: user)).GetProperty("allergens")[0].GetProperty("id").GetInt32() == allergenId, "Approved item can be selected and reloaded");
+        await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = new[] { allergenId, eggId } }, user);
+        await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = new[] { allergenId, eggId } }, user);
+        selected = await Send("GET", "/api/users/me/allergens", 200, token: user);
+        Check(selected.GetProperty("allergens").GetArrayLength() == 2, "Repeated PUT preserves the saved set");
+        await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = new[] { eggId } }, user);
+        await Send("PUT", "/api/users/me/allergens", 404, new { allergenIds = new[] { eggId, 99999 } }, user);
+        selected = await Send("GET", "/api/users/me/allergens", 200, token: user);
+        Check(selected.GetProperty("allergens").GetArrayLength() == 1 && selected.GetProperty("allergens")[0].GetProperty("id").GetInt32() == eggId, "Changing an overlapping set persists and invalid IDs leave it unchanged");
         await Send("POST", $"/api/admin/allergen-requests/{id}/approve", 409, token: admin);
         await Send("POST", "/api/users/me/allergens/custom", 409, new { name = "Hạt chia" }, user);
         await Send("POST", "/api/admin/allergen-requests/99999/approve", 404, token: admin);

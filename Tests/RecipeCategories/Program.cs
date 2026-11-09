@@ -8,6 +8,17 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--verify-allergen-selection-mysql"))
+{
+    try { await AllergenSelectionMySqlTests.RunAsync(); }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine($"MySQL allergen selection verification failed ({error.GetType().Name}).");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 if (args.Contains("--apply-allergen-review-schema") || args.Contains("--verify-allergen-review-schema"))
 {
     try { await AllergenReviewSchema.RunAsync(args.Contains("--apply-allergen-review-schema")); }
@@ -25,11 +36,11 @@ if (args.Contains("--birth-year"))
     return;
 }
 
-if (args.Contains("--admin-api") || args.Contains("--allergen-review"))
+if (args.Contains("--admin-api") || args.Contains("--allergen-review") || args.Contains("--location-api"))
 {
     try
     {
-        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"));
+        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"), locationOnly: args.Contains("--location-api"));
     }
     catch (Exception error)
     {
