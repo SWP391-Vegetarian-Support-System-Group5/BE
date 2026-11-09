@@ -26,17 +26,33 @@ public class ReferenceDataAndRestaurantService(
         await allergens.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.AllergenId, x.Name, null)).ToListAsync(cancellationToken);
     public async Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default)
     {
-        var entity = new Allergen { Name = request.Name.Trim() };
-        await EnsureUniqueAsync(allergens.Query(), entity.Name, x => x.Name, cancellationToken);
-        await allergens.AddAsync(entity, cancellationToken); await allergens.SaveChangesAsync(cancellationToken);
+        var name = await ValidateAllergenNameAsync(request.Name, null, cancellationToken);
+        var entity = new Allergen { Name = name };
+        await allergens.AddAsync(entity, cancellationToken);
+        try { await allergens.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException error) when (error.InnerException is MySqlConnector.MySqlException { Number: 1062 })
+        { throw new ServiceException("Dị ứng này đã có trong danh mục.", 409); }
         return new(entity.AllergenId, entity.Name);
     }
 
     public async Task UpdateAllergenAsync(int id, AllergenRequest request, CancellationToken cancellationToken = default)
     {
-        var entity = await RequireAsync(allergens, id, cancellationToken); var name = request.Name.Trim();
-        if (!string.Equals(entity.Name, name, StringComparison.OrdinalIgnoreCase)) await EnsureUniqueAsync(allergens.Query().Where(x => x.AllergenId != id), name, x => x.Name, cancellationToken);
-        entity.Name = name; await allergens.SaveChangesAsync(cancellationToken);
+        var entity = await RequireAsync(allergens, id, cancellationToken);
+        entity.Name = await ValidateAllergenNameAsync(request.Name, id, cancellationToken);
+        try { await allergens.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateException error) when (error.InnerException is MySqlConnector.MySqlException { Number: 1062 })
+        { throw new ServiceException("Dị ứng này đã có trong danh mục.", 409); }
+    }
+
+    private async Task<string> ValidateAllergenNameAsync(string input, int? exceptId, CancellationToken ct)
+    {
+        var name = System.Text.RegularExpressions.Regex.Replace(input.Trim(), @"\s+", " ");
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 150)
+            throw new ServiceException("Tên dị ứng phải từ 1 đến 150 ký tự.", 400);
+        var catalog = await allergens.Query().AsNoTracking().Where(x => x.AllergenId != exceptId).ToListAsync(ct);
+        if (AllergenLexicon.FindExisting(name, catalog) is { } duplicate)
+            throw new ServiceException($"Dị ứng này trùng hoặc đồng nghĩa với '{duplicate}' đã có.", 409);
+        return name;
     }
 
     public async Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default)

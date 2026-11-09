@@ -14,7 +14,8 @@ public static class AllergenLexicon
         ["Peanut"] = ["peanut", "peanuts", "đậu phộng", "lạc"],
         ["Soy"] = ["soy", "soya", "đậu nành", "đậu tương", "tofu", "đậu hũ"],
         ["Gluten"] = ["gluten", "wheat", "lúa mì", "bột mì", "mì căn"],
-        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "hạnh nhân", "almond", "hạt điều", "cashew"]
+        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "hạnh nhân", "almond", "hạt điều", "cashew"],
+        ["Sesame"] = ["sesame", "mè", "vừng"]
     };
 
     public static string Normalize(string value)
@@ -35,6 +36,8 @@ public static class AllergenLexicon
     }
 
     public static bool IsKnown(string name) => KnownTerms(name) is not null;
+
+    public static string DuplicateKey(string name) => Normalize(KnownTerms(name)?.FirstOrDefault() ?? name);
 
     private static string[]? KnownTerms(string name)
     {

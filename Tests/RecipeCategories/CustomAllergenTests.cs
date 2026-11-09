@@ -16,6 +16,7 @@ static class CustomAllergenTests
         using var db = new VegetarianDbContext(new DbContextOptionsBuilder<VegetarianDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         db.Users.Add(new User { UserId = 1, Email = "allergy@example.invalid", PasswordHash = "unused", Role = "USER" });
+        db.Users.Add(new User { UserId = 2, Email = "admin@example.invalid", PasswordHash = "unused", Role = "ADMIN", IsActive = true });
         db.Allergens.AddRange(new Allergen { Name = "Egg" }, new Allergen { Name = "Milk" });
         await db.SaveChangesAsync();
 
@@ -36,21 +37,34 @@ static class CustomAllergenTests
         Check(calls == 0 && await db.Allergens.CountAsync() == 2, "invalid and synonymous names do not call AI or write data");
 
         var result = await service.AddCustomAsync(1, "mè");
-        Check(result.Allergens.Any(x => x.Name == "Mè") && await db.UserAllergens.CountAsync() == 1,
-            "accepted custom allergen is saved and attached to user without admin review");
-        Check(AllergenLexicon.FindExisting("sesame", await db.Allergens.ToListAsync()) is null,
-            "no synonym is stored in the database");
+        Check(result.Status == "PENDING" && await db.Allergens.CountAsync() == 2 && !await db.UserAllergens.AnyAsync(),
+            "AI accepted request waits for admin and cannot affect meal plans");
+        await RejectAsync(() => service.AddCustomAsync(1, "  MÈ  "), 409);
+        await RejectAsync(() => service.AddCustomAsync(1, "vừng"), 409);
+        Check(calls == 1, "pending duplicates including known synonyms are rejected before AI");
+        Check(AllergenLexicon.DuplicateKey("Mè") == AllergenLexicon.DuplicateKey(" VỪNG ") &&
+              AllergenLexicon.DuplicateKey("vừng") == AllergenLexicon.DuplicateKey("sesame"),
+            "synonymous pending names share one MySQL uniqueness key");
+        await RejectAsync(() => service.ReviewAsync(result.Id, 1, true, null), 403);
+        var approved = await service.ReviewAsync(result.Id, 2, true, null);
+        Check(approved.Status == "APPROVED" && await db.Allergens.CountAsync() == 3 && !await db.UserAllergens.AnyAsync(),
+            "approval updates catalog but user still chooses explicitly");
+        await RejectAsync(() => service.ReviewAsync(result.Id, 2, true, null), 409);
+        var selected = await service.UpdateAsync(1, new([approved.AllergenId!.Value]));
+        Check(selected.Allergens.Single().Name == "Mè", "approved allergen can be selected and reloaded");
+        Check(AllergenLexicon.FindExisting("sesame", await db.Allergens.ToListAsync()) == "Mè",
+            "sesame and Vietnamese aliases resolve without storing synonyms");
         response = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = JsonSerializer.Serialize(new { allowed = false, name = "", duplicateOf = "Mè", reason = "Tên tiếng Anh của mè." }) } } } } } });
         await RejectAsync(() => service.AddCustomAsync(1, "sesame"), 409);
-        Check(calls == 2 && await db.Allergens.CountAsync() == 3, "AI rejects a synonymous resubmission without adding another row");
+        Check(calls == 1 && await db.Allergens.CountAsync() == 3, "catalog synonym rejected immediately without another AI call");
 
         var matchCalls = 0;
         var matchResponse = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = JsonSerializer.Serialize(new { unsafeIngredientIds = new[] { 10 } }) } } } } } });
         using var matchClient = new HttpClient(new StubHandler(() => { matchCalls++; return matchResponse; })) { BaseAddress = new Uri("https://example.invalid/") };
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var matcher = new GeminiAllergenIngredientMatcher(matchClient, new GeminiChatbotSettings { ApiKey = "test" }, cache);
-        var sesame = new Ingredient { IngredientId = 10, Name = "Sesame", Category = new IngredientCategory { DietaryGroup = "PLANT" } };
-        var allergy = await db.Allergens.SingleAsync(x => x.Name == "Mè");
+        var sesame = new Ingredient { IngredientId = 10, Name = "Chia seeds", Category = new IngredientCategory { DietaryGroup = "PLANT" } };
+        var allergy = new Allergen { AllergenId = 999, Name = "Hạt chia" };
         Check((await matcher.FindUnsafeAsync([allergy], [sesame])).Contains(10), "AI matches a custom allergy with an English ingredient name");
         Check((await matcher.FindUnsafeAsync([allergy], [sesame])).Contains(10) && matchCalls == 1,
             "AI decisions are cached briefly in memory, without a database column");

@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync()
+    public static async Task RunAsync(bool allergensOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -48,6 +48,7 @@ static class AdminApiTests
         builder.Services.AddSingleton<INotificationEventPublisher, TestNotificationPublisher>();
         builder.Services.AddSingleton<IEmailSender, NoEmail>();
         builder.Services.AddSingleton<IOpenStreetMapService, TestMap>();
+        builder.Services.AddSingleton<IRestaurantRouteService, TestRoute>();
         builder.Services.AddSingleton<IImageStorage, TestImageStorage>();
         builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
         builder.Services.AddControllers().AddApplicationPart(typeof(AdministrationController).Assembly);
@@ -107,6 +108,11 @@ static class AdminApiTests
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
+            if (allergensOnly)
+            {
+                await AllergenReviewApiTests.RunAsync(client, admin, user);
+                return;
+            }
             await SendImage("recipes", 401, null);
             await SendImage("restaurants", 403, user);
             await SendImage("categories", 403, user);
@@ -127,7 +133,7 @@ static class AdminApiTests
                 ("POST","/api/admin/allergens",new { name="Test allergen" }), ("PUT","/api/admin/allergens/1",new { name="Test allergen" }), ("DELETE","/api/admin/allergens/1",null),
                 ("POST","/api/admin/restaurants",new { name="Test", address="Test address" }), ("PUT","/api/admin/restaurants/1",new { name="Test",address="Test address" }), ("DELETE","/api/admin/restaurants/1",null),
                 ("GET","/api/admin/moderation",null), ("GET","/api/admin/moderation/1",null), ("POST","/api/admin/moderation/1/approve",null), ("POST","/api/admin/moderation/1/remove",null),
-                ("POST","/api/recipe-categories",new {name="Test",slug="test",type="CUISINE"}), ("PUT","/api/recipe-categories/1",new {name="Test",slug="test",type="CUISINE"}),
+                ("POST","/api/recipe-categories",new {name="Test"}), ("PUT","/api/recipe-categories/1",new {name="Test"}),
                 ("PUT","/api/admin/recipes/1/categories",new {categoryIds=Array.Empty<int>()})
             };
             foreach (var route in adminRoutes)
@@ -205,13 +211,13 @@ static class AdminApiTests
             await Send("DELETE", $"/api/admin/restaurants/{restaurantId}", 204, token: admin);
             await Send("GET", $"/api/restaurants/{restaurantId}", 404, token: admin);
 
-            var category = await Send("POST", "/api/recipe-categories", 201, new {name="Test category",slug="test-category",type="CUISINE",isActive=true}, admin);
+            var category = await Send("POST", "/api/recipe-categories", 201, new {name="Test category",isActive=true}, admin);
             var categoryId = category.GetProperty("id").GetInt32();
-            await Send("POST", "/api/recipe-categories", 409, new {name="Duplicate",slug="test-category",type="CUISINE"}, admin);
-            await Send("POST", "/api/recipe-categories", 400, new {name="Invalid",slug="bad",type="NOT_A_TYPE"}, admin);
-            await Send("POST", "/api/recipe-categories", 400, new {name="External image",slug="external-image",type="CUISINE",imageUrl="https://example.com/photo.jpg"}, admin);
-            await Send("PUT", $"/api/recipe-categories/{categoryId}", 200, new {name="Changed category",slug="test-category",type="CUISINE",isActive=false}, admin);
-            var visible = await Send("GET", "/api/recipe-categories?type=CUISINE", 200);
+            await Send("POST", "/api/recipe-categories", 409, new {name="Test category"}, admin);
+            await Send("POST", "/api/recipe-categories", 400, new {name="   "}, admin);
+            await Send("POST", "/api/recipe-categories", 400, new {name=new string('x', 151)}, admin);
+            await Send("PUT", $"/api/recipe-categories/{categoryId}", 200, new {name="Changed category",isActive=false}, admin);
+            var visible = await Send("GET", "/api/recipe-categories", 200);
             if (visible.EnumerateArray().Any(x=>x.GetProperty("id").GetInt32()==categoryId)) throw new Exception("Inactive category leaked to public");
             var all = await Send("GET", "/api/recipe-categories?includeInactive=true", 200, token: admin);
             if (!all.EnumerateArray().Any(x=>x.GetProperty("id").GetInt32()==categoryId)) throw new Exception("Admin cannot see inactive category");
@@ -263,7 +269,7 @@ static class AdminApiTests
             var recipePost = await Send("GET", $"/api/posts/{recipeId}", 200);
             if (recipePost.GetProperty("thumbnailUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image was not shown on the post");
             if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
-            var grainsId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "mon-tu-ngu-coc").GetProperty("id").GetInt32();
+            var grainsId = all.EnumerateArray().Single(x => x.GetProperty("name").GetString() == "Món từ ngũ cốc").GetProperty("id").GetInt32();
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{grainsId} }, admin);
             var categoryPosts = await Send("GET", $"/api/posts?category={grainsId}", 200);
             if (!categoryPosts.EnumerateArray().Any(x => x.GetProperty("postId").GetInt32() == recipeId)) throw new Exception("Public recipe category page cannot list the assigned post");
@@ -311,6 +317,12 @@ static class AdminApiTests
     {
         public Task<string> UploadAsync(Stream image, string extension, string purpose, CancellationToken ct) =>
             Task.FromResult($"https://res.cloudinary.com/test/image/upload/v1/{purpose}/mock{extension}");
+    }
+
+    sealed class TestRoute : IRestaurantRouteService
+    {
+        public Task<RestaurantRouteResponse> GetRouteAsync(decimal originLatitude, decimal originLongitude, decimal destinationLatitude, decimal destinationLongitude, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Route providers are not used by admin API tests.");
     }
 
     sealed class TestMap : IOpenStreetMapService

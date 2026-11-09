@@ -22,6 +22,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<RecipeStep> RecipeSteps => Set<RecipeStep>();
     public DbSet<RecipeDietCompatibility> RecipeDietCompatibilities => Set<RecipeDietCompatibility>();
     public DbSet<Allergen> Allergens => Set<Allergen>();
+    public DbSet<AllergenSubmission> AllergenSubmissions => Set<AllergenSubmission>();
     public DbSet<UserAllergen> UserAllergens => Set<UserAllergen>();
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
     public DbSet<RestaurantDietType> RestaurantDietTypes => Set<RestaurantDietType>();
@@ -145,6 +146,24 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasKey(x => new { x.UserId, x.AllergenId });
             entity.HasOne(x => x.User).WithMany(x => x.UserAllergens).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Allergen).WithMany(x => x.UserAllergens).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<AllergenSubmission>(entity =>
+        {
+            entity.ToTable("AllergenSubmissions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.SubmittedName).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(20).IsRequired().IsConcurrencyToken();
+            entity.Property(x => x.PendingKey).HasMaxLength(200);
+            entity.Property(x => x.SubmittedPendingKey).HasMaxLength(200);
+            entity.Property(x => x.RejectionReason).HasMaxLength(1000);
+            entity.HasIndex(x => x.PendingKey).IsUnique();
+            entity.HasIndex(x => x.SubmittedPendingKey).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.CreatedAt });
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany().HasForeignKey(x => x.ReviewedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<Allergen>().WithMany().HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.SetNull);
         });
     }
 
