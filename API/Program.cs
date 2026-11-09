@@ -6,6 +6,7 @@ using DAL.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.EntityFrameworkCore;
@@ -19,19 +20,7 @@ using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".aiven.env"));
-var runDatabaseStartupTasks = builder.Configuration.GetValue("Database:RunStartupTasks", true);
 const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
-
-if (!runDatabaseStartupTasks)
-{
-    // Database-disabled development mode must not depend on Windows Event Log or persisted keys.
-    builder.Logging.ClearProviders();
-    builder.Logging.AddConsole();
-    var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, ".local", "DataProtection-Keys"));
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(keyDirectory)
-        .SetApplicationName("VegetarianSupportSystem.Local");
-}
 
 builder.Services.Configure<FormOptions>(options =>
 {
@@ -42,7 +31,13 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.MaxRequestBodySize = maxUploadSize;
 });
-var connectionString = builder.Configuration.GetConnectionString("VegetarianSupportDatabase") ?? throw new InvalidOperationException("Database connection string is not configured.");
+var connectionString = builder.Configuration.GetConnectionString("VegetarianSupportDatabase");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "Database connection string is missing or empty. Set ConnectionStrings__VegetarianSupportDatabase " +
+        "in API/.env, API/.aiven.env, or environment variables to a valid MySQL connection string.");
+}
 var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOperationException("JWT signing key is not configured or is too short.");
 
@@ -52,10 +47,12 @@ builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseMySql(
 builder.Services.AddVegetarianBusinessLogic();
 builder.Services.AddSingleton<CommunityEventStream>();
 builder.Services.AddSingleton<ICommunityEventPublisher>(provider => provider.GetRequiredService<CommunityEventStream>());
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<INotificationEventPublisher, SignalRNotificationPublisher>();
 builder.Services.AddMemoryCache();
 var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
 builder.Services.AddSingleton(cloudinarySettings);
-builder.Services.AddSingleton<IImageStorage, CloudinaryImageStorage>();
+builder.Services.AddSingleton<BLL.Services.IImageStorage, BLL.Services.CloudinaryImageStorage>();
 builder.Services.AddScoped<MediaImageService>();
 builder.Services.AddSingleton(new ImageGenerationSettings
 {
@@ -76,19 +73,30 @@ builder.Services.AddRateLimiter(options =>
 });
 var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
+builder.Services.AddScoped<API.Services.IImageStorage, API.Services.CloudinaryImageStorage>();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
-builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
-{
-    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
-    client.Timeout = TimeSpan.FromSeconds(40);
-});
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
 builder.Services.AddSingleton(sendGridSettings);
 builder.Services.AddHttpClient("Gemini", client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(geminiSettings.ChatTimeoutSeconds, 10, 120));
+});
+builder.Services.AddHttpClient<IModerationAiService, GeminiModerationAiService>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(40);
+});
+builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(40);
+});
+builder.Services.AddHttpClient<IAllergenIngredientMatcher, GeminiAllergenIngredientMatcher>(client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+    client.Timeout = TimeSpan.FromSeconds(20);
 });
 builder.Services.AddHttpClient("GeminiFiles", client =>
 {
@@ -113,12 +121,24 @@ builder.Services.AddHttpClient("Nominatim", client =>
     client.Timeout = TimeSpan.FromSeconds(10);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
 });
+builder.Services.AddHttpClient("OSRM", client =>
+{
+    client.BaseAddress = new Uri("https://router.project-osrm.org/");
+    client.Timeout = TimeSpan.FromSeconds(12);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("VeggieMate-SWP391/1.0");
+});
+builder.Services.AddScoped<IRestaurantRouteService, RestaurantRouteService>();
 builder.Services.AddScoped<IOpenStreetMapService, OpenStreetMapService>();
 builder.Services.AddScoped<IAiChatService>(provider => new GeminiChatbotService(provider.GetRequiredService<IHttpClientFactory>().CreateClient("Gemini"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiChatbotService>>()));
-builder.Services.AddSingleton(new VideoRecipeSettings { StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing") });
+builder.Services.AddSingleton(new VideoRecipeSettings
+{
+    StorageDirectory = Path.Combine(builder.Environment.ContentRootPath, ".local", "video-processing"),
+    PollIntervalSeconds = Math.Clamp(builder.Configuration.GetValue("VideoRecipe:PollIntervalSeconds", 30), 10, 300)
+});
 builder.Services.AddSingleton<LocalVideoStorage>();
 builder.Services.AddSingleton<IVideoRecipeAnalyzer>(provider => new GeminiVideoRecipeAnalyzer(provider.GetRequiredService<IHttpClientFactory>().CreateClient("GeminiFiles"), provider.GetRequiredService<GeminiChatbotSettings>(), provider.GetRequiredService<ILogger<GeminiVideoRecipeAnalyzer>>()));
-if (runDatabaseStartupTasks) builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
+// Video analysis is an application feature, independent from database schema maintenance.
+builder.Services.AddHostedService<VideoRecipeProcessingWorker>();
 builder.Services.AddSingleton<IKnowledgeBaseService>(_ => new LocalKnowledgeBaseService(Path.Combine(AppContext.BaseDirectory, "KnowledgeBase")));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IEmailSender>(provider => new SendGridEmailSender(
@@ -146,6 +166,17 @@ builder.Services.AddCors(options => options.AddPolicy("DevelopmentFrontend", pol
     .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            // Negotiation uses the Authorization header; WebSocket upgrades use the query token.
+            if (context.Request.Path.StartsWithSegments("/hubs/notifications") &&
+                !string.IsNullOrEmpty(context.Request.Query["access_token"]))
+                context.Token = context.Request.Query["access_token"];
+            return Task.CompletedTask;
+        }
+    };
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -160,8 +191,27 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
+// Render terminates TLS at its load balancer and forwards requests to Kestrel
+// over HTTP. Trust those forwarded headers so generated OpenAPI URLs retain
+// the browser-facing HTTPS scheme and host.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                               ForwardedHeaders.XForwardedProto |
+                               ForwardedHeaders.XForwardedHost;
+    // The container is reachable through Render's proxy, whose IP addresses
+    // are not static. Render does not expose Kestrel directly to the public.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.Services.AddSwaggerGen(options =>
 {
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "VeggieMate API",
+        Version = "v1",
+        Description = "VeggieMate backend API"
+    });
     options.TagActionsBy(api =>
     {
         var controller = (api.ActionDescriptor as ControllerActionDescriptor)?.ControllerName;
@@ -189,34 +239,38 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+// Must run before Swagger/redirect/authentication so ASP.NET Core sees the
+// original public HTTPS URL instead of Render's internal HTTP hop.
+app.UseForwardedHeaders();
 app.UseMiddleware<ApiExceptionMiddleware>();
-var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue("Swagger:Enabled", false);
-if (swaggerEnabled) { app.UseSwagger(); app.UseSwaggerUI(); }
-if (runDatabaseStartupTasks) app.UseHttpsRedirection();
-app.UseStaticFiles();
+var swaggerEnabled = app.Environment.IsDevelopment() || app.Configuration.GetValue("Swagger:Enabled", true);
+if (swaggerEnabled)
+{
+    app.UseSwagger(options =>
+    {
+        options.PreSerializeFilters.Add((document, request) =>
+        {
+            var scheme = request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? request.Scheme;
+            var host = request.Headers["X-Forwarded-Host"].FirstOrDefault() ?? request.Host.Value;
+            document.Servers = [new OpenApiServer { Url = $"{scheme}://{host}{request.PathBase}" }];
+        });
+    });
+    app.UseSwaggerUI(options =>
+    {
+        options.RoutePrefix = "swagger";
+        // A relative URL works with Render's HTTPS proxy and with local hosts.
+        options.SwaggerEndpoint("./v1/swagger.json", "VeggieMate API v1");
+        options.DocumentTitle = "VeggieMate API Documentation";
+    });
+}
+// Render terminates HTTPS at its proxy. Redirect only for local/non-production hosting.
+if (!app.Environment.IsProduction()) app.UseHttpsRedirection();
 app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
-
-if (runDatabaseStartupTasks)
-{
-    using var scope = app.Services.CreateScope();
-    var services = scope.ServiceProvider;
-    await ImageSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RecipeNameSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await RecipeCategorySchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await IngredientSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await BMISchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await services.GetRequiredService<VegetarianDbContext>().Database.MigrateAsync();
-    await AllergenSubmissionSchemaUpdate.ApplyAsync(services.GetRequiredService<VegetarianDbContext>());
-    await services.GetRequiredService<ISeedService>().SeedAsync();
-}
-else
-{
-    Console.WriteLine("Startup migration, seed, and the video-processing worker are disabled. API database access remains enabled.");
-}
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();

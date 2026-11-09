@@ -8,7 +8,7 @@ Backend MUST-HAVE cho hệ thống hỗ trợ người ăn chay. API cung cấp 
 API (controllers, JWT, Swagger, middleware)
     -> BLL (business services, validation, meal selection, AI abstractions)
         -> DAL (EF Core entities, DbContext, repositories)
-            -> SQL Server
+            -> MySQL
 ```
 
 `API` không truy cập `DbContext` trực tiếp. `BLL` chỉ làm việc qua repository ở `DAL`.
@@ -17,7 +17,7 @@ API (controllers, JWT, Swagger, middleware)
 
 - ASP.NET Core Web API / .NET 8
 - C# and Entity Framework Core 8
-- SQL Server Express
+- MySQL 8
 - JWT Bearer authentication
 - Swagger / OpenAPI
 
@@ -46,6 +46,14 @@ On startup, idempotent seed data is added only when absent: five diet types, fou
 
 ## Run
 
+Configure the MySQL connection before starting the API. Add the following key to `API/.env` and replace the example values with your database details:
+
+```dotenv
+ConnectionStrings__VegetarianSupportDatabase="Server=localhost;Port=3306;Database=VegetarianSupportSystemDB;User=root;Password=YOUR_PASSWORD;"
+```
+
+For Aiven, use the host, port, database, username, and password from your Aiven service and append `SslMode=Required;`. The API also loads `API/.aiven.env` after `.env`; values in `.aiven.env` override matching settings. Both files are ignored by Git. The empty value in `appsettings.json` is a placeholder and cannot connect to a database.
+
 ```powershell
 dotnet restore
 dotnet build SWP391_VegetarianSupportSystem.sln
@@ -54,18 +62,13 @@ dotnet run --project API/API.csproj
 
 Swagger in Development: `http://localhost:5000/swagger` or the launch-profile URL shown by `dotnet run`.
 
-To run Swagger and test database-independent endpoints without a local database:
-
-```powershell
-$env:Database__RunStartupTasks = "false"
-dotnet run --project API/API.csproj --launch-profile http
-```
-
-This mode supports health and location catalogue endpoints. Authentication, restaurants, posts, recipes, meal plans, and other database-backed endpoints remain unavailable.
+The API never modifies the database schema at startup. Apply any future schema change explicitly through a reviewed migration or a one-off maintenance command before deploying the API. This prevents a running web service from executing `ALTER`, `DROP`, or data backfill operations when Render restarts an instance.
 
 The location catalogue is embedded in the BLL and does not require SQL Server. It contains all 34 provincial-level units and all 3,321 commune-level units effective from 1 July 2025 under Decision 19/2025/QD-TTg. Each area uses its official five-digit administrative code. The source PDFs and generated catalogue can be validated again with `scripts/extract_administrative_areas.py`.
 
 ## Authentication
+
+User profile requests and responses use nullable integer `birthYear` (for example, `2003`) instead of `birthDate`. The API maps this to the existing MySQL `UserProfiles.BirthYear` INT column. Future years are rejected; `activityLevel` remains a separate field.
 
 Use `POST /api/auth/login` then paste the returned token into Swagger's **Authorize** dialog.
 

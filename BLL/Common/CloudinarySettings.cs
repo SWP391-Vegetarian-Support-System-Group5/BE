@@ -12,6 +12,7 @@ namespace BLL.Common
         public string ApiKey { get; init; } = string.Empty;
         public string ApiSecret { get; init; } = string.Empty;
         public string VideoFolder { get; init; } = "veggiemate/videos";
+        public string ImageFolder { get; init; } = "veggiemate/images";
         public int UploadRequestTimeoutSeconds { get; init; } = 300;
         public int UploadTotalTimeoutSeconds { get; init; } = 900;
 

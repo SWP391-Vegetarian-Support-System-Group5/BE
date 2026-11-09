@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BLL.Services;
 
-public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryService recipeCategories, ICommunityEventPublisher communityEvents)
+public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPublisher communityEvents)
 {
     public Task<List<IngredientCategoryResponse>> GetCategoriesAsync(CancellationToken ct) =>
         db.IngredientCategories.AsNoTracking().OrderBy(x => x.IngredientCategoryId)
@@ -50,7 +50,6 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
         category.Code = code; category.Name = name; category.DietaryGroup = group;
         await db.SaveChangesAsync(ct);
         await RefreshCompatibilityAsync(ct);
-        await recipeCategories.BackfillDietaryAsync(ct);
         await transaction.CommitAsync(ct);
         foreach (var recipeId in affectedRecipes) await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
         return new(category.IngredientCategoryId, category.Code, category.Name, category.DietaryGroup);
@@ -77,7 +76,6 @@ public class IngredientCatalogService(VegetarianDbContext db, RecipeCategoryServ
         ingredient.Name = name; ingredient.IngredientCategoryId = category.IngredientCategoryId; ingredient.Category = category; ingredient.AllergenId = request.AllergenId;
         await db.SaveChangesAsync(ct);
         await RefreshCompatibilityAsync(ct);
-        await recipeCategories.BackfillDietaryAsync(ct);
         await transaction.CommitAsync(ct);
         foreach (var recipeId in affectedRecipes) await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
         return new(ingredient.IngredientId, ingredient.Name, category.IngredientCategoryId, category.DietaryGroup, ingredient.AllergenId);

@@ -1,0 +1,12 @@
+# Kế hoạch làm sạch dữ liệu Aiven để kiểm thử
+
+Chưa chạy lệnh xóa dữ liệu. Chỉ chạy kế hoạch này sau khi đã sao lưu và xác nhận đúng Aiven database. Không xóa `__EFMigrationsHistory` hay schema. Không dùng `TRUNCATE` hoặc `FOREIGN_KEY_CHECKS=0` vì thao tác dễ xóa nhầm hoặc để lại liên kết hỏng.
+
+1. Xuất bản sao lưu có thể phục hồi, ghi lại tên database, số lượng hàng từng bảng và `UserId` của các tài khoản `Role = 'ADMIN'`. Kiểm tra có ít nhất một admin đang hoạt động và đăng nhập được.
+2. Dừng API và tác vụ nền xử lý video trong lúc làm sạch, vì chúng có thể ghi lại dữ liệu ngay khi đang xóa.
+3. Dùng transaction trên bản sao/staging trước. Xóa bảng con trước bảng cha theo khóa ngoại thực tế từ `information_schema.KEY_COLUMN_USAGE`. Nhóm cần xóa gồm: `ModerationFlags`, `VideoRecipeDraftIngredients`, `VideoRecipeDraftSteps`, `VideoRecipeDrafts`, `RecipeBMITypes`, `RecipeCategoryMappings`, `RecipeDietCompatibility`, `RecipeIngredients`, `RecipeSteps`, `MealPlanMeals`, `MealPlans`, `ChatMessages`, `ChatSessions`, `PostRatings`, `Bookmarks`, `Comments`, `RestaurantIngredients`, `RestaurantDietTypes`, `RestaurantFoods`, `Restaurants`, `Recipes`, `Posts`, `UserAllergens`, `EmailOtpCodes`, `UserProfiles` của người không phải admin, rồi `Users` của người không phải admin. Kiểm tra tiếp các bảng mới hoặc khóa ngoại mới trước khi chạy trên Aiven.
+4. Giữ nguyên `UserProfiles` của admin. Các bảng danh mục và dữ liệu tham chiếu (`DietTypes`, `Allergens`, `BMITypes`, `IngredientCategories`, `Ingredients`, `RecipeCategories`) cần quyết định có giữ hay làm mới. Nếu muốn chỉ giữ account admin thì phải xóa dữ liệu tham chiếu theo thứ tự khóa ngoại sau bước 3; API sẽ seed lại một số bảng khi khởi động. Lưu ý `SeedService` có thể tạo lại công thức mẫu nếu sau đó có user thường; nên tắt/chỉnh seed mẫu trước khi tạo bộ dữ liệu sạch.
+5. Trong cùng transaction, đối chiếu số hàng: không còn post/comment/recipe/notification/draft/meal plan cũ; còn đủ admin và profile. `COMMIT` chỉ khi đúng. Nếu bất kỳ kiểm tra nào sai: `ROLLBACK`, khôi phục từ backup nếu cần.
+6. Khởi động API, kiểm tra đăng nhập admin, seed tham chiếu, API danh mục và các endpoint quản trị. Không dùng dữ liệu production để thử lệnh xóa lần đầu.
+
+Trước khi áp dụng lên Aiven, tạo script SQL từ schema thực tế tại thời điểm thực hiện. Các tên bảng trên được rà từ `VegetarianDbContext`; script tĩnh dễ lạc hậu khi schema đổi.

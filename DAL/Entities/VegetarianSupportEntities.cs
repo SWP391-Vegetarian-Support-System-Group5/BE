@@ -23,13 +23,15 @@ public class UserProfile
     public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }
-    public DateTime? BirthDate { get; set; }
+    public int? BirthYear { get; set; }
     public decimal? HeightCm { get; set; }
     public decimal? WeightKg { get; set; }
     public string? ActivityLevel { get; set; }
+    public decimal? GoalWeightKg { get; set; }
     public int? DietTypeId { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
+    public string? LivingAddress { get; set; }
     public User User { get; set; } = null!;
     public DietType? DietType { get; set; }
 }
@@ -51,7 +53,7 @@ public class DietType
     public int DietTypeId { get; set; }
     public string Name { get; set; } = null!;
     public ICollection<UserProfile> UserProfiles { get; set; } = new List<UserProfile>();
-    public ICollection<Restaurant> Restaurants { get; set; } = new List<Restaurant>();
+    public ICollection<RestaurantDietType> RestaurantMappings { get; set; } = new List<RestaurantDietType>();
     public ICollection<RecipeDietCompatibility> RecipeCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
 }
 
@@ -74,6 +76,7 @@ public class Post
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<PostRating> Ratings { get; set; } = new List<PostRating>();
     public ICollection<Bookmark> Bookmarks { get; set; } = new List<Bookmark>();
+    public ICollection<ModerationFlag> ModerationFlags { get; set; } = new List<ModerationFlag>();
 }
 
 public class Comment
@@ -116,14 +119,15 @@ public class Recipe
     public int? PrepMinutes { get; set; }
     public int? CookMinutes { get; set; }
     public decimal? Servings { get; set; }
+    // Calories are an estimate for one serving, never a medical guarantee.
     public decimal? CaloriesPerServing { get; set; }
     public string? VideoUrl { get; set; }
+    public string? ImageUrl { get; set; }
     public Post Post { get; set; } = null!;
     public ICollection<RecipeIngredient> Ingredients { get; set; } = new List<RecipeIngredient>();
     public ICollection<RecipeStep> Steps { get; set; } = new List<RecipeStep>();
     public ICollection<RecipeDietCompatibility> DietCompatibilities { get; set; } = new List<RecipeDietCompatibility>();
     public ICollection<RecipeCategoryMapping> CategoryMappings { get; set; } = new List<RecipeCategoryMapping>();
-    public ICollection<RecipeBMIType> BMITypes { get; set; } = new List<RecipeBMIType>();
 }
 
 public class RecipeIngredient
@@ -175,11 +179,28 @@ public class Restaurant
     public int RestaurantId { get; set; }
     public string Name { get; set; } = null!;
     public string Address { get; set; } = null!;
+    public string? ImageUrl { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
-    public int? DietTypeId { get; set; }
-    public DietType? DietType { get; set; }
+    public ICollection<RestaurantDietType> DietTypes { get; set; } = new List<RestaurantDietType>();
     public ICollection<RestaurantFood> Foods { get; set; } = new List<RestaurantFood>();
+    public ICollection<RestaurantIngredient> Ingredients { get; set; } = new List<RestaurantIngredient>();
+}
+
+public class RestaurantDietType
+{
+    public int RestaurantId { get; set; }
+    public int DietTypeId { get; set; }
+    public Restaurant Restaurant { get; set; } = null!;
+    public DietType DietType { get; set; } = null!;
+}
+
+public class RestaurantIngredient
+{
+    public int RestaurantId { get; set; }
+    public int IngredientId { get; set; }
+    public Restaurant Restaurant { get; set; } = null!;
+    public Ingredient Ingredient { get; set; } = null!;
 }
 
 public class RestaurantFood
@@ -196,6 +217,10 @@ public class MealPlan
     public DateTime StartDate { get; set; }
     public string? AvailableIngredients { get; set; }
     public decimal? BMI { get; set; }
+    public decimal? Tdee { get; set; }
+    public decimal? TargetCaloriesPerDay { get; set; }
+    public int? CalorieAdjustment { get; set; }
+    public string? NutritionGoal { get; set; }
     public User User { get; set; } = null!;
     public ICollection<MealPlanMeal> Meals { get; set; } = new List<MealPlanMeal>();
 }
@@ -210,6 +235,8 @@ public class MealPlanMeal
     public int DayNumber { get; set; }
     public string MealType { get; set; } = null!;
     public int RecipeId { get; set; }
+    // Snapshot used to preserve the estimate shown when this plan was generated.
+    public decimal? PlannedCalories { get; set; }
     public MealPlan MealPlan { get; set; } = null!;
     public Recipe Recipe { get; set; } = null!;
 }
@@ -237,6 +264,7 @@ public class ChatMessage
 public class VideoRecipeDraft
 {
     public int VideoRecipeDraftId { get; set; }
+    public int? RecipePostId { get; set; }
     public int UserId { get; set; }
     public string VideoUrl { get; set; } = null!;
     public string? GeminiFileName { get; set; }
@@ -246,6 +274,7 @@ public class VideoRecipeDraft
     public string? Description { get; set; }
     public string? Transcript { get; set; }
     public int? EstimatedPrepMinutes { get; set; }
+    public decimal? CaloriesPerServing { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

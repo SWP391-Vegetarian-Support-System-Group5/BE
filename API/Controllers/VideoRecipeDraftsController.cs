@@ -73,6 +73,9 @@ public class VideoRecipeDraftsController(IVideoRecipeDraftService videoRecipeDra
         return CreatedAtAction(nameof(GetById), new { id = draft.VideoRecipeDraftId }, draft);
     }
 
+    [HttpGet]
+    public Task<IReadOnlyCollection<VideoRecipeDraftResponse>> GetMine(CancellationToken ct) => videoRecipeDraftService.GetMineAsync(User.GetRequiredUserId(), ct);
+
     [HttpGet("{id:int}")]
     public Task<VideoRecipeDraftResponse> GetById(int id, CancellationToken ct) => videoRecipeDraftService.GetAsync(id, User.GetRequiredUserId(), User.GetRoleName(), ct);
 

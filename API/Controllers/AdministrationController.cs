@@ -15,6 +15,7 @@ public class AdministrationController(IUserAdministrationService userAdministrat
 {
     [HttpGet("users")] public Task<IReadOnlyCollection<UserResponse>> GetUsers(CancellationToken ct) => userAdministrationService.GetUsersAsync(ct);
     [HttpGet("users/{id:int}")] public Task<UserResponse> GetUser(int id, CancellationToken ct) => userAdministrationService.GetUserByIdAsync(id, ct);
+    [HttpGet("users/{id:int}/activity")] public Task<AdminUserActivityResponse> GetUserActivity(int id, CancellationToken ct) => userAdministrationService.GetActivityAsync(id, ct);
     [HttpPut("users/{id:int}/status")] public async Task<IActionResult> UpdateUserStatus(int id, UpdateUserStatusRequest request, CancellationToken ct) { await userAdministrationService.UpdateStatusAsync(id, request.IsActive, ct); return NoContent(); }
     [HttpDelete("users/{id:int}")] public async Task<IActionResult> DeleteUser(int id, CancellationToken ct) { await userAdministrationService.DeleteAsync(id, ct); return NoContent(); }
 

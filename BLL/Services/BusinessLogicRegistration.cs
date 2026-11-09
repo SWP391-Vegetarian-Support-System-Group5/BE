@@ -17,16 +17,14 @@ public static class BusinessLogicRegistration
         services.AddScoped<IPostService, PostService>();
         services.AddScoped<IRecipeService, RecipeService>();
         services.AddScoped<RecipeCategoryService>();
-        services.AddScoped<RecipeBmiService>();
         services.AddScoped<IngredientCatalogService>();
         services.AddScoped<IMealPlanService, MealPlanService>();
         services.AddScoped<IChatService, NutritionChatbotService>();
         services.AddScoped<IVideoRecipeDraftService, VideoRecipeDraftService>();
         services.AddScoped<IModerationService, ModerationService>();
-        services.AddScoped<ISeedService, SeedService>();
+        services.AddSingleton<IUserNotificationService, UserNotificationService>();
         services.AddScoped<IHealthService, HealthService>();
         services.AddSingleton<IIngredientRecognitionService, MockIngredientRecognitionService>();
-        services.AddSingleton<IModerationAiService, MockModerationAiService>();
         return services;
     }
 }

@@ -2,7 +2,10 @@ using BLL.Services;
 
 namespace API.Services;
 
-public sealed class VideoRecipeProcessingWorker(IServiceScopeFactory scopeFactory, ILogger<VideoRecipeProcessingWorker> logger) : BackgroundService
+public sealed class VideoRecipeProcessingWorker(
+    IServiceScopeFactory scopeFactory,
+    VideoRecipeSettings settings,
+    ILogger<VideoRecipeProcessingWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -17,7 +20,7 @@ public sealed class VideoRecipeProcessingWorker(IServiceScopeFactory scopeFactor
             {
                 logger.LogError(exception, "Video recipe processing worker failed.");
             }
-            await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(settings.PollIntervalSeconds), stoppingToken);
         }
     }
 }
