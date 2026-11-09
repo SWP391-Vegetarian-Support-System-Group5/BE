@@ -13,7 +13,7 @@ public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Requ
 public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
-public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, string? LivingAddress, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null);
+public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, string? LivingAddress, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null, string? AvatarUrl = null);
 public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,

@@ -18,6 +18,8 @@ public class User
 
 public class UserProfile
 {
+    public string? AvatarUrl { get; set; }
+    public string? AvatarPublicId { get; set; }
     public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }

@@ -8,6 +8,17 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--apply-avatar-schema") || args.Contains("--verify-avatar-schema") || args.Contains("--verify-avatar-cloudinary"))
+{
+    try { await AvatarVerification.RunAsync(args.Contains("--apply-avatar-schema"), args.Contains("--verify-avatar-cloudinary")); }
+    catch (Exception error)
+    {
+        Console.Error.WriteLine($"Avatar verification failed ({error.GetType().Name}); credentials are not printed.");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 if (args.Contains("--verify-allergen-selection-mysql"))
 {
     try { await AllergenSelectionMySqlTests.RunAsync(); }
@@ -36,11 +47,11 @@ if (args.Contains("--birth-year"))
     return;
 }
 
-if (args.Contains("--admin-api") || args.Contains("--allergen-review") || args.Contains("--location-api"))
+if (args.Contains("--admin-api") || args.Contains("--allergen-review") || args.Contains("--location-api") || args.Contains("--avatar-api"))
 {
     try
     {
-        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"), locationOnly: args.Contains("--location-api"));
+        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"), locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"));
     }
     catch (Exception error)
     {
