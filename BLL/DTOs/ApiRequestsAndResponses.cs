@@ -13,7 +13,7 @@ public record VerifyEmailOtpRequest([Required, EmailAddress] string Email, [Requ
 public record ResetPasswordWithOtpRequest([Required, EmailAddress] string Email, [Required, RegularExpression("^[0-9]{6}$")] string OtpCode, [Required, MinLength(6)] string NewPassword);
 public record EmailOtpSentResponse(string Email, string Message, int ExpiresInSeconds);
 public record ApiMessageResponse(string Message);
-public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, string? LivingAddress, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null, string? AvatarUrl = null);
+public record UserResponse(int UserId, string Email, string Role, string FullName, string? Sex, int? BirthYear, decimal? HeightCm, decimal? WeightKg, string? ActivityLevel, int? DietTypeId, decimal? Latitude, decimal? Longitude, string? LivingAddress, bool IsActive, DateTime? CreatedAt = null, bool? IsEmailVerified = null, decimal? GoalWeightKg = null);
 public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
@@ -37,9 +37,6 @@ public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
 public record AddCustomAllergenRequest([Required, MinLength(2), MaxLength(80)] string Name);
-public record RejectAllergenSubmissionRequest([Required, MaxLength(1000)] string Reason);
-public record AllergenSubmissionResponse(int Id, int UserId, string SubmittedName, string Name, string Status,
-    string Message, string? RejectionReason, int? AllergenId, DateTime CreatedAt, DateTime? ReviewedAt, int? ReviewedByUserId);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
 public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups);
 public record AllergenRequest([Required, MaxLength(150)] string Name);

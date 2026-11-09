@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool allergensOnly = false)
+    public static async Task RunAsync()
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -48,8 +48,7 @@ static class AdminApiTests
         builder.Services.AddSingleton<INotificationEventPublisher, TestNotificationPublisher>();
         builder.Services.AddSingleton<IEmailSender, NoEmail>();
         builder.Services.AddSingleton<IOpenStreetMapService, TestMap>();
-        builder.Services.AddSingleton<IRestaurantRouteService, TestRoute>();
-        builder.Services.AddSingleton<API.Services.IImageStorage, TestImageStorage>();
+        builder.Services.AddSingleton<IImageStorage, TestImageStorage>();
         builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
         builder.Services.AddControllers().AddApplicationPart(typeof(AdministrationController).Assembly);
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -67,7 +66,7 @@ static class AdminApiTests
             var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
             foreach (var (id, role) in new[] { (1, "ADMIN"), (2, "USER"), (3, "USER") })
                 db.Users.Add(new User { UserId = id, Email = $"user{id}@example.invalid", PasswordHash = PasswordHasher.Hash("Test@123"), Role = role,
-                    IsActive = true, IsEmailVerified = true, Profile = new UserProfile { FullName = $"Test {id}", AvatarUrl = "https://res.cloudinary.com/test/image/upload/avatar.jpg" } });
+                    IsActive = true, IsEmailVerified = true, Profile = new UserProfile { FullName = $"Test {id}" } });
             foreach (var name in new[] { "VEGAN", "VEGETARIAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN" }) db.DietTypes.Add(new DietType { Name = name });
             db.IngredientCategories.AddRange(new IngredientCategory { Code = "PLANT", Name = "Plant", DietaryGroup = "PLANT" }, new IngredientCategory { Code = "DAIRY", Name = "Dairy", DietaryGroup = "DAIRY" });
             db.RecipeCategories.AddRange(new[] { "Món từ ngũ cốc", "Bánh", "Món ăn sáng", "Bánh mì & bánh kẹp", "Tráng miệng", "Mì", "Salad & món ăn kèm", "Nước sốt", "Ăn nhẹ", "Súp & món hầm" }.Select(name => new RecipeCategory { Name = name, CreatedAt = DateTime.UtcNow }));
@@ -106,64 +105,8 @@ static class AdminApiTests
             }
             var adminLogin = await Send("POST", "/api/auth/login", 200, new { email = "user1@example.invalid", password = "Test@123" });
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
-            if (userLogin.GetProperty("user").GetProperty("avatarUrl").GetString() != "https://res.cloudinary.com/test/image/upload/avatar.jpg")
-                throw new Exception("Login response lost the saved avatar after merging profile changes");
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
-            if (allergensOnly)
-            {
-                foreach (var (method, path, body) in new (string, string, object?)[] {
-                    ("GET", "/api/admin/allergen-requests", null),
-                    ("POST", "/api/admin/allergen-requests/1/approve", null),
-                    ("POST", "/api/admin/allergen-requests/1/reject", new { reason = "Invalid" }) })
-                {
-                    await Send(method, path, 401, body);
-                    await Send(method, path, 403, body, user);
-                }
-                await Send("GET", "/api/users/me/allergen-requests", 401);
-                var submitted = await Send("POST", "/api/users/me/allergens/custom", 200, new { name = "Mè" }, user);
-                var id = submitted.GetProperty("id").GetInt32();
-                if (submitted.GetProperty("status").GetString() != "PENDING") throw new Exception("Submission did not wait for admin review");
-                await Send("POST", "/api/users/me/allergens/custom", 409, new { name = "Mè" }, user);
-                var catalog = await Send("GET", "/api/allergens", 200, token: user);
-                if (catalog.GetArrayLength() != 0) throw new Exception("Pending allergen leaked into catalog");
-                var own = await Send("GET", "/api/users/me/allergen-requests", 200, token: user);
-                var other = await Send("GET", "/api/users/me/allergen-requests", 200, token: admin);
-                if (own.GetArrayLength() != 1 || other.GetArrayLength() != 0) throw new Exception("Submission history is not scoped to user");
-                var pending = await Send("GET", "/api/admin/allergen-requests?status=PENDING", 200, token: admin);
-                if (pending.GetArrayLength() != 1) throw new Exception("Admin pending queue is incomplete");
-                await Send("GET", "/api/admin/allergen-requests?status=INVALID", 400, token: admin);
-                await Send("POST", $"/api/admin/allergen-requests/{id}/reject", 400, new { reason = "   " }, admin);
-                await Send("POST", $"/api/admin/allergen-requests/{id}/reject", 400, new { }, admin);
-                await Send("POST", $"/api/admin/allergen-requests/{id}/reject", 400, new { reason = new string('x', 1001) }, admin);
-                const string reason = "Tên cần được bổ sung thông tin để xác minh.";
-                var rejected = await Send("POST", $"/api/admin/allergen-requests/{id}/reject", 200, new { reason }, admin);
-                if (rejected.GetProperty("status").GetString() != "REJECTED" || rejected.GetProperty("rejectionReason").GetString() != reason ||
-                    !rejected.GetProperty("message").GetString()!.Contains(reason)) throw new Exception("Rejection response lost admin reason");
-                own = await Send("GET", "/api/users/me/allergen-requests", 200, token: user);
-                if (own[0].GetProperty("rejectionReason").GetString() != reason) throw new Exception("Reason was not persisted for FE reload");
-                await Send("POST", $"/api/admin/allergen-requests/{id}/approve", 409, token: admin);
-                if ((await Send("GET", "/api/allergens", 200, token: user)).GetArrayLength() != 0) throw new Exception("Rejected allergen leaked into catalog");
-                submitted = await Send("POST", "/api/users/me/allergens/custom", 200, new { name = "Mè" }, user);
-                id = submitted.GetProperty("id").GetInt32();
-                var approvedSubmission = await Send("POST", $"/api/admin/allergen-requests/{id}/approve", 200, token: admin);
-                var approvedAllergenId = approvedSubmission.GetProperty("allergenId").GetInt32();
-                if (approvedSubmission.GetProperty("status").GetString() != "APPROVED") throw new Exception("Approval status missing");
-                catalog = await Send("GET", "/api/allergens", 200, token: user);
-                if (catalog.GetArrayLength() != 1 || catalog[0].GetProperty("id").GetInt32() != approvedAllergenId) throw new Exception("Approved allergen missing from full catalog");
-                var selections = await Send("GET", "/api/users/me/allergens", 200, token: user);
-                if (selections.GetProperty("allergens").GetArrayLength() != 1) throw new Exception("Approval did not attach allergy to requester");
-                await Send("POST", $"/api/admin/allergen-requests/{id}/approve", 409, token: admin);
-                await Send("POST", "/api/admin/allergen-requests/99999/approve", 404, token: admin);
-                // Another admin may add the same allergen while a submission is pending.
-                submitted = await Send("POST", "/api/users/me/allergens/custom", 200, new { name = "Hạt chia" }, user);
-                id = submitted.GetProperty("id").GetInt32();
-                var existing = await Send("POST", "/api/admin/allergens", 201, new { name = "Hạt chia" }, admin);
-                approvedSubmission = await Send("POST", $"/api/admin/allergen-requests/{id}/approve", 200, token: admin);
-                if (approvedSubmission.GetProperty("allergenId").GetInt32() != existing.GetProperty("id").GetInt32()) throw new Exception("Approval duplicated existing catalog item");
-                Console.WriteLine($"ALLERGEN REVIEW PASS: {checks} HTTP checks; EF InMemory, no Aiven writes.");
-                return;
-            }
             await SendImage("recipes", 401, null);
             await SendImage("restaurants", 403, user);
             await SendImage("categories", 403, user);
@@ -262,12 +205,12 @@ static class AdminApiTests
             await Send("DELETE", $"/api/admin/restaurants/{restaurantId}", 204, token: admin);
             await Send("GET", $"/api/restaurants/{restaurantId}", 404, token: admin);
 
-            var category = await Send("POST", "/api/recipe-categories", 201, new {name="Test category",isActive=true}, admin);
+            var category = await Send("POST", "/api/recipe-categories", 201, new {name="Test category",slug="test-category",type="CUISINE",isActive=true}, admin);
             var categoryId = category.GetProperty("id").GetInt32();
-            await Send("POST", "/api/recipe-categories", 409, new {name="Test category"}, admin);
-            await Send("POST", "/api/recipe-categories", 400, new {name="   "}, admin);
-            await Send("POST", "/api/recipe-categories", 400, new {name=new string('x', 151)}, admin);
-            await Send("PUT", $"/api/recipe-categories/{categoryId}", 200, new {name="Changed category",isActive=false}, admin);
+            await Send("POST", "/api/recipe-categories", 409, new {name="Duplicate",slug="test-category",type="CUISINE"}, admin);
+            await Send("POST", "/api/recipe-categories", 400, new {name="Invalid",slug="bad",type="NOT_A_TYPE"}, admin);
+            await Send("POST", "/api/recipe-categories", 400, new {name="External image",slug="external-image",type="CUISINE",imageUrl="https://example.com/photo.jpg"}, admin);
+            await Send("PUT", $"/api/recipe-categories/{categoryId}", 200, new {name="Changed category",slug="test-category",type="CUISINE",isActive=false}, admin);
             var visible = await Send("GET", "/api/recipe-categories?type=CUISINE", 200);
             if (visible.EnumerateArray().Any(x=>x.GetProperty("id").GetInt32()==categoryId)) throw new Exception("Inactive category leaked to public");
             var all = await Send("GET", "/api/recipe-categories?includeInactive=true", 200, token: admin);
@@ -320,7 +263,7 @@ static class AdminApiTests
             var recipePost = await Send("GET", $"/api/posts/{recipeId}", 200);
             if (recipePost.GetProperty("thumbnailUrl").GetString() != "https://res.cloudinary.com/test/image/upload/v1/tofu.jpg") throw new Exception("Recipe image was not shown on the post");
             if (recipePost.GetProperty("compatibleDietTypes").GetArrayLength() == 0 || !recipePost.GetProperty("compatibleDietTypes").EnumerateArray().Any(x => x.GetProperty("name").GetString() == "VEGAN")) throw new Exception("Plant recipe post did not expose its compatible diet types");
-            var grainsId = all.EnumerateArray().Single(x => x.GetProperty("name").GetString() == "Món từ ngũ cốc").GetProperty("id").GetInt32();
+            var grainsId = all.EnumerateArray().Single(x => x.GetProperty("slug").GetString() == "mon-tu-ngu-coc").GetProperty("id").GetInt32();
             await Send("PUT", $"/api/admin/recipes/{recipeId}/categories", 204, new { categoryIds=new[]{grainsId} }, admin);
             var categoryPosts = await Send("GET", $"/api/posts?category={grainsId}", 200);
             if (!categoryPosts.EnumerateArray().Any(x => x.GetProperty("postId").GetInt32() == recipeId)) throw new Exception("Public recipe category page cannot list the assigned post");
@@ -364,16 +307,10 @@ static class AdminApiTests
         public Task SendAsync(int userId, UserNotificationResponse notification, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    sealed class TestImageStorage : API.Services.IImageStorage
+    sealed class TestImageStorage : IImageStorage
     {
         public Task<string> UploadAsync(Stream image, string extension, string purpose, CancellationToken ct) =>
             Task.FromResult($"https://res.cloudinary.com/test/image/upload/v1/{purpose}/mock{extension}");
-    }
-
-    sealed class TestRoute : IRestaurantRouteService
-    {
-        public Task<RestaurantRouteResponse> GetRouteAsync(decimal originLatitude, decimal originLongitude, decimal destinationLatitude, decimal destinationLongitude, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Route providers are not used by admin API tests.");
     }
 
     sealed class TestMap : IOpenStreetMapService

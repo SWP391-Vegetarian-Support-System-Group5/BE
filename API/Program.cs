@@ -14,7 +14,6 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using CloudinaryDotNet;
-using System.Threading.RateLimiting;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,28 +51,9 @@ builder.Services.AddSingleton<INotificationEventPublisher, SignalRNotificationPu
 builder.Services.AddMemoryCache();
 var cloudinarySettings = builder.Configuration.GetSection("Cloudinary").Get<CloudinarySettings>() ?? new CloudinarySettings();
 builder.Services.AddSingleton(cloudinarySettings);
-builder.Services.AddSingleton<BLL.Services.IImageStorage, BLL.Services.CloudinaryImageStorage>();
-builder.Services.AddScoped<MediaImageService>();
-builder.Services.AddSingleton(new ImageGenerationSettings
-{
-    ApiKey = builder.Configuration["GeminiImages:ApiKey"] ?? builder.Configuration["Gemini:ApiKey"] ?? "",
-    Model = builder.Configuration["GeminiImages:Model"] ?? "gemini-2.5-flash-image"
-});
-builder.Services.AddHttpClient<IMealImageGenerator, GeminiMealImageGenerator>(client =>
-{
-    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
-    client.Timeout = TimeSpan.FromSeconds(120);
-});
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("image-generation", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.User.GetRequiredUserId(), _ => new FixedWindowRateLimiterOptions
-        { PermitLimit = 3, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
-});
 var cloudinaryAccount = new CloudinaryDotNet.Account(cloudinarySettings.CloudName, cloudinarySettings.ApiKey, cloudinarySettings.ApiSecret);
 builder.Services.AddSingleton(new CloudinaryDotNet.Cloudinary(cloudinaryAccount));
-builder.Services.AddScoped<API.Services.IImageStorage, API.Services.CloudinaryImageStorage>();
+builder.Services.AddScoped<IImageStorage, CloudinaryImageStorage>();
 var geminiSettings = builder.Configuration.GetSection("Gemini").Get<GeminiChatbotSettings>() ?? new GeminiChatbotSettings();
 builder.Services.AddSingleton(geminiSettings);
 var sendGridSettings = builder.Configuration.GetSection("SendGrid").Get<SendGridSettings>() ?? new SendGridSettings();
@@ -226,7 +206,7 @@ builder.Services.AddSwaggerGen(options =>
             "MealPlans" => "Meal Planner",
             "Chat" or "AiFeatures" or "VideoRecipeDrafts" => "AI Assistant",
             "Reports" => "Moderation",
-            "Administration" or "AllergenReview" => "Administration",
+            "Administration" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
             "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
@@ -269,7 +249,6 @@ app.UseRouting();
 app.UseCors("DevelopmentFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<NotificationHub>("/hubs/notifications");
 

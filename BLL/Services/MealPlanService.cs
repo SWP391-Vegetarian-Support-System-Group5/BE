@@ -1,4 +1,4 @@
-using BLL.Common;
+﻿using BLL.Common;
 using BLL.DTOs;
 using DAL.Entities;
 using DAL.Data;
@@ -16,8 +16,7 @@ public class MealPlanService(
     IRepository<MealPlanMeal> mealPlanMeals,
     IMemoryCache cache,
     VegetarianDbContext dbContext,
-    IAllergenIngredientMatcher allergenMatcher,
-    IImageStorage? imageStorage = null) : IMealPlanService
+    IAllergenIngredientMatcher allergenMatcher) : IMealPlanService
 {
     private sealed record MealCandidate(int Id, decimal Calories, int PreferenceRank);
     private sealed record PlannedMeal(int Day, string MealType, int RecipeId, decimal Calories);
@@ -50,7 +49,6 @@ public class MealPlanService(
         mealPlans.Remove(oldPlan);
         await mealPlans.SaveChangesAsync(ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
-        if (transaction is not null) await CleanupImagesAsync(oldMeals.Select(m => m.ImagePublicId));
         cache.Set(cacheKey, regenCount + 1, TimeSpan.FromDays(1));
         return replacement;
     }
@@ -421,14 +419,5 @@ public class MealPlanService(
         await mealPlanMeals.SaveChangesAsync(cancellationToken);
         mealPlans.Remove(plan);
         await mealPlans.SaveChangesAsync(cancellationToken);
-        await CleanupImagesAsync(meals.Select(m => m.ImagePublicId));
-    }
-
-    private async Task CleanupImagesAsync(IEnumerable<string?> ids)
-    {
-        if (imageStorage is null) return;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        foreach (var id in ids.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct())
-            await imageStorage.DeleteAsync(id!, timeout.Token);
     }
 }

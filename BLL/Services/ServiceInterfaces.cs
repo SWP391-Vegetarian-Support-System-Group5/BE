@@ -40,10 +40,7 @@ public interface IUserAllergenService
 {
     Task<UserAllergensResponse> GetAsync(int userId, CancellationToken cancellationToken = default);
     Task<UserAllergensResponse> UpdateAsync(int userId, UpdateUserAllergensRequest request, CancellationToken cancellationToken = default);
-    Task<AllergenSubmissionResponse> AddCustomAsync(int userId, string name, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<AllergenSubmissionResponse>> GetSubmissionsAsync(int userId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<AllergenSubmissionResponse>> GetReviewQueueAsync(string? status, CancellationToken cancellationToken = default);
-    Task<AllergenSubmissionResponse> ReviewAsync(int id, int adminId, bool approve, string? reason, CancellationToken cancellationToken = default);
+    Task<UserAllergensResponse> AddCustomAsync(int userId, string name, CancellationToken cancellationToken = default);
 }
 
 public record ValidatedAllergenName(string Name);

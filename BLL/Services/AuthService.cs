@@ -131,8 +131,7 @@ public class AuthService(
         user.IsActive,
         user.CreatedAt,
         user.IsEmailVerified,
-        user.Profile?.GoalWeightKg,
-        user.Profile?.AvatarUrl);
+        user.Profile?.GoalWeightKg);
 
     private async Task<EmailOtpSentResponse> CreateAndSendOtpAsync(string email, string purpose, CancellationToken cancellationToken)
     {

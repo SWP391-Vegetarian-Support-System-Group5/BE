@@ -22,7 +22,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<RecipeStep> RecipeSteps => Set<RecipeStep>();
     public DbSet<RecipeDietCompatibility> RecipeDietCompatibilities => Set<RecipeDietCompatibility>();
     public DbSet<Allergen> Allergens => Set<Allergen>();
-    public DbSet<AllergenSubmission> AllergenSubmissions => Set<AllergenSubmission>();
     public DbSet<UserAllergen> UserAllergens => Set<UserAllergen>();
     public DbSet<Restaurant> Restaurants => Set<Restaurant>();
     public DbSet<RestaurantDietType> RestaurantDietTypes => Set<RestaurantDietType>();
@@ -98,8 +97,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<UserProfile>(entity =>
         {
             entity.ToTable("UserProfiles");
-            entity.Property(x => x.AvatarUrl).HasMaxLength(1000);
-            entity.Property(x => x.AvatarPublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.UserId);
             entity.Property(x => x.FullName).HasMaxLength(150).IsRequired();
             entity.Property(x => x.Sex).HasMaxLength(20).IsUnicode(false);
@@ -149,22 +146,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasOne(x => x.User).WithMany(x => x.UserAllergens).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Allergen).WithMany(x => x.UserAllergens).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.NoAction);
         });
-
-        modelBuilder.Entity<AllergenSubmission>(entity =>
-        {
-            entity.ToTable("AllergenSubmissions");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.SubmittedName).HasMaxLength(80).IsRequired();
-            entity.Property(x => x.Name).HasMaxLength(80).IsRequired();
-            entity.Property(x => x.Status).HasMaxLength(20).IsRequired().IsConcurrencyToken();
-            entity.Property(x => x.PendingKey).HasMaxLength(200);
-            entity.Property(x => x.RejectionReason).HasMaxLength(1000);
-            entity.HasIndex(x => x.PendingKey).IsUnique();
-            entity.HasIndex(x => new { x.Status, x.CreatedAt });
-            entity.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<User>().WithMany().HasForeignKey(x => x.ReviewedByUserId).OnDelete(DeleteBehavior.SetNull);
-            entity.HasOne<Allergen>().WithMany().HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.SetNull);
-        });
     }
 
     private static void ConfigureContent(ModelBuilder modelBuilder)
@@ -172,9 +153,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<Post>(entity =>
         {
             entity.ToTable("Posts");
-            entity.Property(x => x.Status).IsConcurrencyToken();
-            entity.Property(x => x.ImageUrl).HasMaxLength(1000);
-            entity.Property(x => x.ImagePublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.PostId);
             entity.Property(x => x.Title).HasMaxLength(250).IsRequired();
             entity.Property(x => x.Content).IsRequired();
@@ -317,9 +295,6 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         modelBuilder.Entity<MealPlanMeal>(entity =>
         {
             entity.ToTable("MealPlanMeals");
-            entity.Property(x => x.RecipeId).IsConcurrencyToken();
-            entity.Property(x => x.ImageUrl).HasMaxLength(1000);
-            entity.Property(x => x.ImagePublicId).HasMaxLength(255).IsConcurrencyToken();
             entity.HasKey(x => x.MealPlanMealId);
             entity.Property(x => x.MealType).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.Property(x => x.PlannedCalories).HasPrecision(8, 2);

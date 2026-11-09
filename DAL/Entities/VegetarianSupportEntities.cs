@@ -18,8 +18,6 @@ public class User
 
 public class UserProfile
 {
-    public string? AvatarUrl { get; set; }
-    public string? AvatarPublicId { get; set; }
     public int UserId { get; set; }
     public string FullName { get; set; } = null!;
     public string? Sex { get; set; }
@@ -59,8 +57,6 @@ public class DietType
 
 public class Post
 {
-    public string? ImageUrl { get; set; }
-    public string? ImagePublicId { get; set; }
     public int PostId { get; set; }
     public int UserId { get; set; }
     public string Title { get; set; } = null!;
@@ -227,9 +223,6 @@ public class MealPlan
 
 public class MealPlanMeal
 {
-    public string? ImageUrl { get; set; }
-    public string? ImagePublicId { get; set; }
-    public bool ImageIsGenerated { get; set; }
     public int MealPlanMealId { get; set; }
     public int MealPlanId { get; set; }
     public int DayNumber { get; set; }

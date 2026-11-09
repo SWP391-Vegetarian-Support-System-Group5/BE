@@ -16,7 +16,6 @@ static class CustomAllergenTests
         using var db = new VegetarianDbContext(new DbContextOptionsBuilder<VegetarianDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         db.Users.Add(new User { UserId = 1, Email = "allergy@example.invalid", PasswordHash = "unused", Role = "USER" });
-        db.Users.Add(new User { UserId = 2, Email = "admin@example.invalid", PasswordHash = "unused", Role = "ADMIN", IsActive = true });
         db.Allergens.AddRange(new Allergen { Name = "Egg" }, new Allergen { Name = "Milk" });
         await db.SaveChangesAsync();
 
@@ -37,13 +36,8 @@ static class CustomAllergenTests
         Check(calls == 0 && await db.Allergens.CountAsync() == 2, "invalid and synonymous names do not call AI or write data");
 
         var result = await service.AddCustomAsync(1, "mè");
-        Check(result.Status == "PENDING" && await db.Allergens.CountAsync() == 2 && !await db.UserAllergens.AnyAsync(),
-            "AI accepted submission stays outside catalog until admin review");
-        await RejectAsync(() => service.ReviewAsync(result.Id, 1, true, null), 403);
-        var approved = await service.ReviewAsync(result.Id, 2, true, null);
-        Check(approved.Status == "APPROVED" && (await service.GetAsync(1)).Allergens.Any(x => x.Name == "Mè"),
-            "admin approval adds catalog item and user selection");
-        await RejectAsync(() => service.ReviewAsync(result.Id, 2, false, "Too late"), 409);
+        Check(result.Allergens.Any(x => x.Name == "Mè") && await db.UserAllergens.CountAsync() == 1,
+            "accepted custom allergen is saved and attached to user without admin review");
         Check(AllergenLexicon.FindExisting("sesame", await db.Allergens.ToListAsync()) is null,
             "no synonym is stored in the database");
         response = JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text = JsonSerializer.Serialize(new { allowed = false, name = "", duplicateOf = "Mè", reason = "Tên tiếng Anh của mè." }) } } } } } });
