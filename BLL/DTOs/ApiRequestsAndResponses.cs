@@ -32,7 +32,7 @@ public record UpdateUserLocationRequest(
     [Range(-90, 90)] decimal Latitude,
     [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-180, 180)] decimal Longitude,
-    [property: MaxLength(300)] string? LivingAddress = null);
+    [MaxLength(300)] string? LivingAddress = null);
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);

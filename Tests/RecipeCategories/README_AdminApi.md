@@ -6,6 +6,29 @@ Run from BE:
 dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj -- --admin-api
 ```
 
+Location HTTP regression checks:
+
+```powershell
+dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj -- --location-api
+```
+
+These cover saving/reloading coordinates and the living address, zero coordinates,
+omitted addresses, missing/out-of-range coordinates, oversized addresses and guest
+access. The valid PUT test catches MVC record validation metadata errors that
+service-only tests cannot detect. `LivingAddress` validation belongs on the record
+constructor parameter, while `JsonRequired` remains on coordinate properties for
+JSON deserialization. Tests use isolated storage and never update live profiles.
+
+Allergen selection persistence can also be checked against the configured MySQL:
+
+```powershell
+dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj -- --verify-allergen-selection-mysql
+```
+
+This runs the real selection service inside an always-rolled-back transaction,
+checks repeat/overlapping selections, removals and invalid IDs, then verifies the
+original selection is unchanged. It never calls AI or changes the schema.
+
 The runner starts a temporary HTTP server on an OS-assigned loopback port and
 stops it in a finally block. It uses actual API controllers, business services,
 validation, exception middleware and signed JWTs obtained through the actual

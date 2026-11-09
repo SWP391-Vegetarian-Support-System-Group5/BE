@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool allergensOnly = false)
+    public static async Task RunAsync(bool allergensOnly = false, bool locationOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -108,6 +108,11 @@ static class AdminApiTests
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
+            if (locationOnly)
+            {
+                await LocationApiTests.RunAsync(client, user);
+                return;
+            }
             if (allergensOnly)
             {
                 await AllergenReviewApiTests.RunAsync(client, admin, user);
