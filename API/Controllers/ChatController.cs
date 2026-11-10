@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using API.Infrastructure;
+using BLL.Common;
 using BLL.DTOs;
 using BLL.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -46,8 +47,16 @@ public class ChatController(IChatService chatService, IDataProtectionProvider pr
                 catch (Exception error) when (error is CryptographicException or JsonException) { trial = null; }
                 if (trial is not null)
                 {
-                    var existing = await chatService.GetSessionAsync(trial.SessionId, null, "GUEST", trial.Token, ct);
-                    return Ok(existing with { GuestAccessToken = trial.Token });
+                    try
+                    {
+                        var existing = await chatService.GetSessionAsync(trial.SessionId, null, "GUEST", trial.Token, ct);
+                        return Ok(existing with { GuestAccessToken = trial.Token });
+                    }
+                    catch (ServiceException error) when (error.StatusCode is 403 or 404)
+                    {
+                        // A guest cookie can outlive its database record after
+                        // cleanup or deployment. Fall through and issue a new trial.
+                    }
                 }
             }
             var session = await chatService.CreateSessionAsync(null, ct);
