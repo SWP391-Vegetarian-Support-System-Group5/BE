@@ -13,6 +13,7 @@ namespace API.Controllers;
 
 [ApiController]
 [Route("api/chat")]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public class ChatController(IChatService chatService, IDataProtectionProvider protection) : ControllerBase
 {
     private const string GuestCookie = "veggiemate_guest_trial";
@@ -45,17 +46,18 @@ public class ChatController(IChatService chatService, IDataProtectionProvider pr
                 GuestTrial? trial;
                 try { trial = JsonSerializer.Deserialize<GuestTrial>(protector.Unprotect(cookie)); }
                 catch (Exception error) when (error is CryptographicException or JsonException) { trial = null; }
-                if (trial is not null)
+                if (trial is { SessionId: > 0 } && !string.IsNullOrWhiteSpace(trial.Token))
                 {
                     try
                     {
                         var existing = await chatService.GetSessionAsync(trial.SessionId, null, "GUEST", trial.Token, ct);
+                        // Preserve valid trials, including their remaining message quota.
                         return Ok(existing with { GuestAccessToken = trial.Token });
                     }
                     catch (ServiceException error) when (error.StatusCode is 403 or 404)
                     {
-                        // A guest cookie can outlive its database record after
-                        // cleanup or deployment. Fall through and issue a new trial.
+                        // Replace deleted sessions or stale tokens and overwrite the cookie.
+                        // Transient failures and cancellations must still propagate.
                     }
                 }
             }
