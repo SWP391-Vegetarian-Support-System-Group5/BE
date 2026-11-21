@@ -27,13 +27,13 @@ public class RecipeService(
         ValidateRecipeRequest(request);
         var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
         await ValidateRelationsAsync(request, cancellationToken);
-        // Administrators are the editorial authority: their create/edit actions publish directly.
-        // Member-submitted recipes still go through AI moderation below.
-        var moderationReason = role == "ADMIN" ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        // Manual member recipes are reviewed by an administrator. AI-created recipes keep AI moderation.
+        var requiresAdminReview = request.RequiresAdminReview && role != "ADMIN";
+        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = "RECIPE", VideoUrl = videoUrl, ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = requiresAdminReview ? "PENDING_REVIEW" : moderationReason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken); await posts.SaveChangesAsync(cancellationToken);
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = post.PostId, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
         var recipe = new Recipe { PostId = post.PostId, RecipeName = request.RecipeName.Trim(), PrepMinutes = request.PrepMinutes, CookMinutes = request.CookMinutes, Servings = request.Servings, CaloriesPerServing = request.CaloriesPerServing, VideoUrl = videoUrl, ImageUrl = imageUrl };
@@ -63,15 +63,21 @@ public class RecipeService(
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
         await ValidateRelationsAsync(request, cancellationToken);
-        // An administrator may correct content directly without routing their work back to AI review.
-        var moderationReason = role == "ADMIN" ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        // A resubmitted manual recipe goes back to the administrator, while AI recipes retain AI moderation.
+        var requiresAdminReview = request.RequiresAdminReview && role != "ADMIN";
+        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
         var wasPublished = recipe.Post.Status == "PUBLISHED";
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
-        recipe.Post.Status = moderationReason is null ? "PUBLISHED" : "DRAFT";
+        recipe.Post.Status = requiresAdminReview ? "PENDING_REVIEW" : moderationReason is null ? "PUBLISHED" : "DRAFT";
         var pendingFlags = await moderationFlags.Query().Where(f => f.PostId == id && f.Source == "AI" && f.Status == "PENDING").ToListAsync(cancellationToken);
         foreach (var flag in pendingFlags) flag.Status = "APPROVED";
+        if (requiresAdminReview)
+        {
+            var rejectedFlags = await moderationFlags.Query().Where(f => f.PostId == id && f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED").ToListAsync(cancellationToken);
+            foreach (var flag in rejectedFlags) flag.Status = "RESUBMITTED";
+        }
         if (moderationReason is not null) await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "AI", Reason = moderationReason, Status = "PENDING" }, cancellationToken);
         recipe.RecipeName = request.RecipeName.Trim();
         recipe.PrepMinutes = request.PrepMinutes; recipe.CookMinutes = request.CookMinutes; recipe.Servings = request.Servings; recipe.CaloriesPerServing = request.CaloriesPerServing; recipe.VideoUrl = videoUrl; recipe.ImageUrl = imageUrl;
@@ -139,7 +145,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing);
+    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing);
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,
