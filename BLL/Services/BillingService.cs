@@ -24,6 +24,7 @@ public interface IBillingService
     Task ConsumeAsync(int userId, string feature, CancellationToken ct = default);
     Task<PaymentTransactionResponse> CreatePaymentAsync(int userId, int planId, CancellationToken ct = default);
     Task<PaymentTransactionResponse?> GetPaymentAsync(long paymentId, int userId, CancellationToken ct = default);
+    Task<PaymentRevenueResponse> GetRevenueAsync(CancellationToken ct = default);
     Task<SePayWebhookResponse> HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default);
 }
 
@@ -102,6 +103,13 @@ public sealed class BillingService(
             ?? throw new ServiceException("Premium plan was not found or is inactive.", 404);
         if (plan.Code == FreePlanCode || plan.PriceVnd <= 0) throw new ServiceException("This plan does not require payment.", 400);
         var now = VietnamTime.Now;
+        var existing = await db.PaymentTransactions.Include(x => x.Plan)
+            .Where(x => x.UserId == userId && x.SubscriptionPlanId == planId && x.Status == "PENDING" && x.ExpiresAt > now)
+            .OrderByDescending(x => x.PaymentTransactionId)
+            .FirstOrDefaultAsync(ct);
+        // Closing the QR dialog does not create a new bank order. Reopen the
+        // still-valid order so the user sees the same QR and transfer code.
+        if (existing is not null) return ToPaymentResponse(existing, existing.Plan);
         var payment = new PaymentTransaction
         {
             UserId = userId, SubscriptionPlanId = plan.SubscriptionPlanId,
@@ -123,6 +131,29 @@ public sealed class BillingService(
             await db.SaveChangesAsync(ct);
         }
         return ToPaymentResponse(payment, payment.Plan);
+    }
+
+    public async Task<PaymentRevenueResponse> GetRevenueAsync(CancellationToken ct = default)
+    {
+        var payments = await db.PaymentTransactions.AsNoTracking()
+            .Where(x => x.Status == "PAID" && x.PaidAt != null)
+            .Include(x => x.Plan)
+            .Include(x => x.User).ThenInclude(x => x.Profile)
+            .OrderByDescending(x => x.PaidAt)
+            .Take(100)
+            .ToListAsync(ct);
+        return new PaymentRevenueResponse(
+            payments.Sum(x => x.AmountVnd),
+            payments.Count,
+            payments.Select(x => new PaymentPurchaseResponse(
+                x.PaymentTransactionId,
+                x.UserId,
+                x.User.Profile?.FullName ?? $"Member #{x.UserId}",
+                x.User.Email,
+                x.Plan.Name,
+                x.AmountVnd,
+                x.PaidAt!.Value,
+                x.TransactionCode)).ToList());
     }
 
     public async Task<SePayWebhookResponse> HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default)
