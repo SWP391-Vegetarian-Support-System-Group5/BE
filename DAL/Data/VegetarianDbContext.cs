@@ -36,6 +36,10 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<VideoRecipeDraftIngredient> VideoRecipeDraftIngredients => Set<VideoRecipeDraftIngredient>();
     public DbSet<VideoRecipeDraftStep> VideoRecipeDraftSteps => Set<VideoRecipeDraftStep>();
     public DbSet<ModerationFlag> ModerationFlags => Set<ModerationFlag>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
+    public DbSet<AiUsageCounter> AiUsageCounters => Set<AiUsageCounter>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -77,6 +81,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
         ConfigureRestaurants(modelBuilder);
         ConfigureMealPlans(modelBuilder);
         ConfigureChatAndModeration(modelBuilder);
+        ConfigureBilling(modelBuilder);
     }
 
     private static void ConfigureUsers(ModelBuilder modelBuilder)
@@ -297,6 +302,52 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.HasOne(x => x.Restaurant).WithMany(x => x.Foods).HasForeignKey(x => x.RestaurantId).OnDelete(DeleteBehavior.NoAction);
         });
 
+    }
+
+    private static void ConfigureBilling(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<SubscriptionPlan>(entity =>
+        {
+            entity.ToTable("SubscriptionPlans");
+            entity.HasKey(x => x.SubscriptionPlanId);
+            entity.Property(x => x.Code).HasMaxLength(40).IsUnicode(false).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.PriceVnd).HasPrecision(12, 0);
+            entity.Property(x => x.RefillIntervalHours).IsRequired();
+            entity.Property(x => x.DurationDays).IsRequired();
+            entity.HasIndex(x => x.Code).IsUnique();
+        });
+        modelBuilder.Entity<UserSubscription>(entity =>
+        {
+            entity.ToTable("UserSubscriptions");
+            entity.HasKey(x => x.UserSubscriptionId);
+            entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.HasIndex(x => new { x.UserId, x.Status, x.ExpiresAt });
+            entity.HasOne(x => x.User).WithMany(x => x.Subscriptions).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Plan).WithMany(x => x.Subscriptions).HasForeignKey(x => x.SubscriptionPlanId).OnDelete(DeleteBehavior.NoAction);
+        });
+        modelBuilder.Entity<PaymentTransaction>(entity =>
+        {
+            entity.ToTable("PaymentTransactions");
+            entity.HasKey(x => x.PaymentTransactionId);
+            entity.Property(x => x.TransactionCode).HasMaxLength(100).IsUnicode(false).IsRequired();
+            entity.Property(x => x.AmountVnd).HasPrecision(12, 0);
+            entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
+            entity.Property(x => x.ProviderTransactionId).HasMaxLength(120).IsUnicode(false);
+            entity.Property(x => x.ProviderPayload).HasColumnType("longtext");
+            entity.HasIndex(x => x.TransactionCode).IsUnique();
+            entity.HasIndex(x => x.ProviderTransactionId).IsUnique();
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.SubscriptionPlanId).OnDelete(DeleteBehavior.NoAction);
+        });
+        modelBuilder.Entity<AiUsageCounter>(entity =>
+        {
+            entity.ToTable("AiUsageCounters");
+            entity.HasKey(x => x.AiUsageCounterId);
+            entity.Property(x => x.Feature).HasMaxLength(30).IsUnicode(false).IsRequired();
+            entity.HasIndex(x => new { x.UserId, x.Feature }).IsUnique();
+            entity.HasOne(x => x.User).WithMany(x => x.AiUsageCounters).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.NoAction);
+        });
     }
 
     private static void ConfigureMealPlans(ModelBuilder modelBuilder)

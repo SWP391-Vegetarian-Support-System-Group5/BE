@@ -14,6 +14,64 @@ public class User
     public ICollection<Post> Posts { get; set; } = new List<Post>();
     public ICollection<Comment> Comments { get; set; } = new List<Comment>();
     public ICollection<UserAllergen> UserAllergens { get; set; } = new List<UserAllergen>();
+    public ICollection<UserSubscription> Subscriptions { get; set; } = new List<UserSubscription>();
+    public ICollection<AiUsageCounter> AiUsageCounters { get; set; } = new List<AiUsageCounter>();
+}
+
+public class SubscriptionPlan
+{
+    public int SubscriptionPlanId { get; set; }
+    public string Code { get; set; } = null!;
+    public string Name { get; set; } = null!;
+    public decimal PriceVnd { get; set; }
+    public int ChatbotLimit { get; set; }
+    public int AiPostLimit { get; set; }
+    public int RefillIntervalHours { get; set; }
+    public int DurationDays { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public ICollection<UserSubscription> Subscriptions { get; set; } = new List<UserSubscription>();
+}
+
+public class UserSubscription
+{
+    public long UserSubscriptionId { get; set; }
+    public int UserId { get; set; }
+    public int SubscriptionPlanId { get; set; }
+    public string Status { get; set; } = "ACTIVE";
+    public DateTime StartedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public User User { get; set; } = null!;
+    public SubscriptionPlan Plan { get; set; } = null!;
+}
+
+public class PaymentTransaction
+{
+    public long PaymentTransactionId { get; set; }
+    public int UserId { get; set; }
+    public int SubscriptionPlanId { get; set; }
+    public string TransactionCode { get; set; } = null!;
+    public decimal AmountVnd { get; set; }
+    public string Status { get; set; } = "PENDING";
+    public string? ProviderTransactionId { get; set; }
+    public string? ProviderPayload { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+    public DateTime? PaidAt { get; set; }
+    public User User { get; set; } = null!;
+    public SubscriptionPlan Plan { get; set; } = null!;
+}
+
+public class AiUsageCounter
+{
+    public long AiUsageCounterId { get; set; }
+    public int UserId { get; set; }
+    public string Feature { get; set; } = null!;
+    public DateTime PeriodStartedAt { get; set; }
+    public DateTime NextRefillAt { get; set; }
+    public int UsedCount { get; set; }
+    public User User { get; set; } = null!;
 }
 
 public class UserProfile

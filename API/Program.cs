@@ -15,8 +15,23 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using CloudinaryDotNet;
 
+// `dotnet ef` can be launched from the solution's BE directory while API is
+// the startup project. In that case the default content root would be BE and
+// EF would miss API/.aiven.env, then fall back to a stale local connection.
+// Resolve the actual API project directory before configuration is built.
+var contentRoot = Directory.GetCurrentDirectory();
+if (!File.Exists(Path.Combine(contentRoot, "appsettings.json")))
+{
+    var apiProjectDirectory = Path.Combine(contentRoot, "API");
+    if (File.Exists(Path.Combine(apiProjectDirectory, "appsettings.json")))
+        contentRoot = apiProjectDirectory;
+}
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = contentRoot
+});
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".env"));
 DotEnvConfiguration.AddFile(builder.Configuration, Path.Combine(builder.Environment.ContentRootPath, ".aiven.env"));
 const long maxUploadSize = 500L * 1024 * 1024; // 500 MB
@@ -44,6 +59,9 @@ var mysqlVersion = Version.Parse(builder.Configuration["Database:MySqlVersion"] 
 builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseMySql(
     connectionString, new MySqlServerVersion(mysqlVersion)));
 builder.Services.AddVegetarianBusinessLogic();
+var sePaySettings = builder.Configuration.GetSection("SePay").Get<SePaySettings>() ?? new SePaySettings();
+builder.Services.AddSingleton(sePaySettings);
+builder.Services.AddScoped<IBillingService, BillingService>();
 builder.Services.AddSingleton<CommunityEventStream>();
 builder.Services.AddSingleton<ICommunityEventPublisher>(provider => provider.GetRequiredService<CommunityEventStream>());
 builder.Services.AddSignalR();

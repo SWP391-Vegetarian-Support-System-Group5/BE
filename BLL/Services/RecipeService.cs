@@ -97,9 +97,18 @@ public class RecipeService(
             await notifications.CreateAsync(recipe.Post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", id, cancellationToken);
     }
 
-    public async Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, int? userId = null, CancellationToken cancellationToken = default)
     {
         var query = BaseQuery().Where(x => x.Post.Status == "PUBLISHED" && x.Ingredients.Any() && !x.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup == "UNVERIFIED"));
+        if (userId.HasValue)
+        {
+            var profile = await db.UserProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == userId.Value, cancellationToken);
+            var allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
+            if (profile?.DietTypeId is int dietTypeId)
+                query = query.Where(x => x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId && d.IsCompatible));
+            if (allergenIds.Length > 0)
+                query = query.Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value)));
+        }
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.RecipeName.ToLower().Contains(term) || x.Post.Title.ToLower().Contains(term) || x.Ingredients.Any(i => i.Ingredient.Name.ToLower().Contains(term))); }
         if (categoryId.HasValue) query = query.Where(x => x.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
         return (await query.OrderByDescending(x => x.PostId).ToListAsync(cancellationToken)).Select(x => ToResponse(x)).ToList();

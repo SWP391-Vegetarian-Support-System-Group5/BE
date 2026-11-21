@@ -1,4 +1,5 @@
 using API.Services;
+using API.Infrastructure;
 using BLL.DTOs;
 using BLL.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -22,7 +23,7 @@ public class ReferenceDataController(IReferenceDataAndRestaurantService referenc
     [Authorize]
     [HttpGet("restaurants")] public Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurants([FromQuery] string? keyword, [FromQuery] string? food, CancellationToken ct) => referenceDataService.GetRestaurantsAsync(keyword ?? food, ct);
     [Authorize]
-    [HttpGet("restaurants/nearby")] public Task<IReadOnlyCollection<RestaurantResponse>> Nearby([FromQuery] decimal latitude, [FromQuery] decimal longitude, [FromQuery] decimal radius, [FromQuery] int? dietTypeId, [FromQuery] string? keyword, [FromQuery] string? ingredient, CancellationToken ct) => referenceDataService.GetNearbyRestaurantsAsync(latitude, longitude, radius, dietTypeId, keyword ?? ingredient, ct);
+    [HttpGet("restaurants/nearby")] public Task<IReadOnlyCollection<RestaurantResponse>> Nearby([FromQuery] decimal latitude, [FromQuery] decimal longitude, [FromQuery] decimal radius, [FromQuery] int? dietTypeId, [FromQuery] string? keyword, [FromQuery] string? ingredient, CancellationToken ct) => referenceDataService.GetNearbyRestaurantsAsync(latitude, longitude, radius, dietTypeId, keyword ?? ingredient, User.GetRequiredUserId(), ct);
     [Authorize]
     [HttpGet("restaurants/{id:int}")] public async Task<ActionResult<RestaurantResponse>> GetRestaurant(int id, CancellationToken ct) => (await referenceDataService.GetRestaurantAsync(id, ct)) is { } restaurant ? Ok(restaurant) : NotFound();
     [Authorize]

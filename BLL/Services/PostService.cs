@@ -21,15 +21,13 @@ public class PostService(
     {
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
-        var reason = await moderationAiService.FlagReasonAsync($"Tiêu đề: {request.Title}\nNội dung: {request.Content}", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = reason is null ? "PUBLISHED" : "DRAFT", CreatedAt = now, UpdatedAt = now };
+        // Manual posts never call Gemini. They wait for a human administrator before public publication.
+        var post = new Post { UserId = userId, Title = request.Title.Trim(), Content = request.Content.Trim(), PostType = FixedValues.PostType(request.PostType), VideoUrl = videoUrl, ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl), Status = "PENDING_REVIEW", CreatedAt = now, UpdatedAt = now };
         await posts.AddAsync(post, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
-        if (reason is not null) await SaveAiPostFlagAsync(post.PostId, reason, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         var response = await GetByIdAsync(post.PostId, userId, "USER", cancellationToken);
-        if (reason is null) await communityEvents.PublishAsync(new CommunityEvent("postCreated", post.PostId, Post: response), cancellationToken);
         return response;
     }
 
@@ -38,6 +36,17 @@ public class PostService(
         var query = BaseQuery();
         if (!isAdmin) query = query.Where(x => x.Status == "PUBLISHED");
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
+        // Recipe cards are personalized for signed-in members. Non-recipe community
+        // posts stay visible; only foods conflicting with diet/allergy are excluded.
+        if (!isAdmin && actorId.HasValue)
+        {
+            var profile = await db.UserProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == actorId.Value, cancellationToken);
+            var allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == actorId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
+            if (profile?.DietTypeId is int dietTypeId)
+                query = query.Where(x => x.PostType != "RECIPE" || (x.Recipe != null && x.Recipe.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId && d.IsCompatible)));
+            if (allergenIds.Length > 0)
+                query = query.Where(x => x.PostType != "RECIPE" || (x.Recipe != null && !x.Recipe.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value))));
+        }
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
         if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
         if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
@@ -65,18 +74,34 @@ public class PostService(
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         if (post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
-        var reason = await moderationAiService.FlagReasonAsync($"Tiêu đề: {request.Title}\nNội dung: {request.Content}", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var wasPublished = post.Status == "PUBLISHED";
         var videoUrl = request.VideoUrl?.Trim();
         post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); post.UpdatedAt = VietnamTime.Now;
-        post.Status = reason is null ? "PUBLISHED" : "DRAFT";
-        if (reason is not null) await SaveAiPostFlagAsync(id, reason, cancellationToken);
-        else await ResolveAiPostFlagsAsync(id, cancellationToken);
+        post.Status = role == "ADMIN" ? "PUBLISHED" : "PENDING_REVIEW";
+        await ResolveAdminPostFlagsAsync(id, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         if (post.Status == "PUBLISHED") await communityEvents.PublishAsync(new CommunityEvent(wasPublished ? "postUpdated" : "postCreated", id, Post: await GetByIdAsync(id, actorId, role, cancellationToken)), cancellationToken);
         else if (wasPublished) await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
+    }
+
+    public async Task ReviewManualPostAsync(int id, int adminId, bool approve, string? rejectionReason, CancellationToken cancellationToken = default)
+    {
+        var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
+        if (post.Status != "PENDING_REVIEW") throw new ServiceException("Only posts pending review can be reviewed.", 409);
+        if (!approve && string.IsNullOrWhiteSpace(rejectionReason)) throw new ServiceException("A rejection reason is required.", 400);
+        post.Status = approve ? "PUBLISHED" : "DRAFT";
+        post.UpdatedAt = VietnamTime.Now;
+        if (!approve)
+            await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "ADMIN_REVIEW", Reason = rejectionReason!.Trim(), Status = "REJECTED", ReviewedBy = adminId }, cancellationToken);
+        await posts.SaveChangesAsync(cancellationToken);
+        if (approve)
+        {
+            await communityEvents.PublishAsync(new CommunityEvent("postCreated", id, Post: await GetByIdAsync(id, adminId, "ADMIN", cancellationToken)), cancellationToken);
+            await notifications.CreateAsync(post.UserId, "POST_APPROVED", "Bài viết thủ công của bạn đã được duyệt và đăng công khai.", id, cancellationToken);
+        }
+        else await notifications.CreateAsync(post.UserId, "POST_REJECTED", "Bài viết của bạn bị từ chối và đã được lưu ở bản nháp để bạn chỉnh sửa.", id, cancellationToken);
     }
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
@@ -212,7 +237,7 @@ public class PostService(
         x.CreatedAt,
         x.UpdatedAt,
         x.Recipe?.DietCompatibilities.Where(d => d.IsCompatible).OrderBy(d => d.DietTypeId).Select(d => new PostDietTypeResponse(d.DietTypeId, d.DietType.Name)).ToList() ?? [],
-        actorId == x.UserId ? x.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null,
+        actorId == x.UserId ? x.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null,
         x.Recipe?.ImageUrl,
         x.Recipe?.CaloriesPerServing);
     private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
@@ -235,6 +260,11 @@ public class PostService(
     {
         var pending = await moderationFlags.Query().Where(f => f.PostId == postId && f.Source == "AI" && f.Status == "PENDING").ToListAsync(ct);
         foreach (var flag in pending) flag.Status = "APPROVED";
+    }
+    private async Task ResolveAdminPostFlagsAsync(int postId, CancellationToken ct)
+    {
+        var rejected = await moderationFlags.Query().Where(f => f.PostId == postId && f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED").ToListAsync(ct);
+        foreach (var flag in rejected) flag.Status = "RESUBMITTED";
     }
     private async Task CreateAiCommentFlagAsync(int commentId, string content, CancellationToken ct)
     {
