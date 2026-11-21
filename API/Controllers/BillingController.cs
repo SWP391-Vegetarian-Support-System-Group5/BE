@@ -35,19 +35,23 @@ public class BillingController(IBillingService billing, SePaySettings sePaySetti
 
     [AllowAnonymous]
     [HttpPost("payments/sepay/webhook")]
-    public async Task<IActionResult> SePayWebhook(SePayWebhookRequest request, CancellationToken ct)
+    public async Task<IActionResult> SePayWebhook(
+        SePayWebhookRequest request,
+        [FromHeader(Name = "X-API-Key")] string? webhookApiKey,
+        CancellationToken ct)
     {
-        if (!IsAuthorizedWebhook()) return Unauthorized();
+        if (!IsAuthorizedWebhook(webhookApiKey)) return Unauthorized();
         await billing.HandleSePayWebhookAsync(request, ct);
         // Legacy direct-bank webhooks in SePay treat 201 as their success response.
         return StatusCode(StatusCodes.Status201Created);
     }
 
-    private bool IsAuthorizedWebhook()
+    private bool IsAuthorizedWebhook(string? webhookApiKey)
     {
         if (!string.IsNullOrWhiteSpace(sePaySettings.WebhookApiKey))
         {
-            var actual = Request.Headers["Authorization"].FirstOrDefault()?.Replace("Apikey ", "", StringComparison.OrdinalIgnoreCase)
+            var actual = webhookApiKey
+                ?? Request.Headers["Authorization"].FirstOrDefault()?.Replace("Apikey ", "", StringComparison.OrdinalIgnoreCase)
                 ?? Request.Headers["X-API-Key"].FirstOrDefault();
             return actual is not null && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(actual), Encoding.UTF8.GetBytes(sePaySettings.WebhookApiKey));
         }
