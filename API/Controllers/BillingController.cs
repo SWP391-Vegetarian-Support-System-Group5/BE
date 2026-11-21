@@ -41,9 +41,9 @@ public class BillingController(IBillingService billing, SePaySettings sePaySetti
         CancellationToken ct)
     {
         if (!IsAuthorizedWebhook(webhookApiKey)) return Unauthorized();
-        await billing.HandleSePayWebhookAsync(request, ct);
+        var result = await billing.HandleSePayWebhookAsync(request, ct);
         // Legacy direct-bank webhooks in SePay treat 201 as their success response.
-        return StatusCode(StatusCodes.Status201Created);
+        return StatusCode(StatusCodes.Status201Created, result);
     }
 
     private bool IsAuthorizedWebhook(string? webhookApiKey)

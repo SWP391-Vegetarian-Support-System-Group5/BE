@@ -24,7 +24,7 @@ public interface IBillingService
     Task ConsumeAsync(int userId, string feature, CancellationToken ct = default);
     Task<PaymentTransactionResponse> CreatePaymentAsync(int userId, int planId, CancellationToken ct = default);
     Task<PaymentTransactionResponse?> GetPaymentAsync(long paymentId, int userId, CancellationToken ct = default);
-    Task HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default);
+    Task<SePayWebhookResponse> HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default);
 }
 
 public sealed class BillingService(
@@ -125,7 +125,7 @@ public sealed class BillingService(
         return ToPaymentResponse(payment, payment.Plan);
     }
 
-    public async Task HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default)
+    public async Task<SePayWebhookResponse> HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default)
     {
         if (request.TransferAmount is not > 0) throw new ServiceException("Payment webhook does not contain a valid amount.", 400);
         var lookup = string.Join(" ", request.Code, request.Content, request.Description).Trim();
@@ -140,11 +140,14 @@ public sealed class BillingService(
         var candidates = await db.PaymentTransactions.Include(x => x.Plan)
             .Where(x => x.Status == "PENDING" || x.Status == "EXPIRED")
             .OrderByDescending(x => x.PaymentTransactionId).ToListAsync(ct);
-        var payment = candidates.FirstOrDefault(x => lookup.Contains(x.TransactionCode, StringComparison.OrdinalIgnoreCase));
-        if (payment is null) return; // Do not expose which codes exist to callers.
+        var normalizedLookup = NormalizeTransactionCode(lookup);
+        var payment = candidates.FirstOrDefault(x => normalizedLookup.Contains(NormalizeTransactionCode(x.TransactionCode), StringComparison.Ordinal));
+        if (payment is null)
+            return new(false, false, null, "No pending payment matches the transfer content.");
         if (request.TransferAmount.Value < payment.AmountVnd)
             throw new ServiceException("Payment amount is lower than the order amount.", 400);
-        if (payment.Status == "PAID") return;
+        if (payment.Status == "PAID")
+            return new(true, false, payment.PaymentTransactionId, "Payment was already activated.");
         var now = VietnamTime.Now;
         payment.Status = "PAID";
         payment.PaidAt = now;
@@ -166,6 +169,7 @@ public sealed class BillingService(
             $"Thanh toán {payment.Plan.Name} thành công. Gói của bạn đã được kích hoạt đến {now.AddDays(payment.Plan.DurationDays):dd/MM/yyyy HH:mm}.",
             null,
             ct);
+        return new(true, true, payment.PaymentTransactionId, "Payment matched and the subscription was activated.");
     }
 
     private async Task<SubscriptionPlan> GetCurrentPlanAsync(int userId, CancellationToken ct)
@@ -211,6 +215,9 @@ public sealed class BillingService(
             ? new DateTime(now.Year, now.Month, 1).AddMonths(1)
             : now.AddHours(plan.RefillIntervalHours);
     }
+
+    private static string NormalizeTransactionCode(string value) =>
+        string.Concat(value.Where(char.IsLetterOrDigit)).ToUpperInvariant();
 
     private static SubscriptionPlanResponse ToResponse(SubscriptionPlan x) => new(x.SubscriptionPlanId, x.Code, x.Name, x.PriceVnd, x.ChatbotLimit, x.AiPostLimit, x.RefillIntervalHours, x.DurationDays, x.IsActive);
     private static AiUsageResponse ToUsage(SubscriptionPlan plan, AiUsageCounter chat, AiUsageCounter post, UserSubscription? active) =>
