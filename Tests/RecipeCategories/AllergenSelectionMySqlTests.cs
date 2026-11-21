@@ -26,7 +26,7 @@ static class AllergenSelectionMySqlTests
         var catalog = await db.Allergens.AsNoTracking().OrderBy(x => x.AllergenId).Select(x => x.AllergenId).Take(2).ToListAsync(ct);
         if (userId == 0 || catalog.Count < 2) throw new InvalidOperationException("Verification requires an active user and two existing catalog entries.");
         var original = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId).OrderBy(x => x.AllergenId).Select(x => x.AllergenId).ToListAsync(ct);
-        var service = new UserAllergenService(new Repository<UserAllergen>(db), new Repository<Allergen>(db), new Repository<User>(db), db, new NoAi());
+        var service = new UserAllergenService(new Repository<UserAllergen>(db), new Repository<Allergen>(db), new Repository<User>(db));
         var checks = 0;
         await using (var transaction = await db.Database.BeginTransactionAsync(ct))
         {
@@ -55,11 +55,5 @@ static class AllergenSelectionMySqlTests
         var restored = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId).OrderBy(x => x.AllergenId).Select(x => x.AllergenId).ToListAsync(ct);
         if (!restored.SequenceEqual(original)) throw new InvalidOperationException("Original selection was not restored by rollback.");
         Console.WriteLine($"MYSQL ALLERGEN SELECTION PASS: {checks} real service save/reload checks; transaction rolled back and original selection verified unchanged.");
-    }
-
-    private sealed class NoAi : IAllergenNameValidator
-    {
-        public Task<ValidatedAllergenName> ValidateAsync(string input, IReadOnlyCollection<Allergen> existing, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Selection updates must not invoke AI.");
     }
 }

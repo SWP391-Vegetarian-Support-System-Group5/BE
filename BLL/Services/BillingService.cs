@@ -27,7 +27,10 @@ public interface IBillingService
     Task HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default);
 }
 
-public sealed class BillingService(VegetarianDbContext db, SePaySettings sePaySettings) : IBillingService
+public sealed class BillingService(
+    VegetarianDbContext db,
+    SePaySettings sePaySettings,
+    IUserNotificationService notifications) : IBillingService
 {
     private const string FreePlanCode = "FREE";
     public const string ChatFeature = "CHATBOT";
@@ -130,8 +133,12 @@ public sealed class BillingService(VegetarianDbContext db, SePaySettings sePaySe
         // Match the SePay transfer text in memory. Provider messages contain a
         // user-entered description, so this is both more reliable and easier to
         // keep database-provider independent than translating String.Contains.
+        // A bank/SePay callback can arrive after the browser has marked an
+        // order expired.  The exact generated transfer code and amount are
+        // still authoritative, so accept a late callback once instead of
+        // leaving a paid customer on the Free plan.
         var candidates = await db.PaymentTransactions.Include(x => x.Plan)
-            .Where(x => x.Status == "PENDING" && x.ExpiresAt > VietnamTime.Now)
+            .Where(x => x.Status == "PENDING" || x.Status == "EXPIRED")
             .OrderByDescending(x => x.PaymentTransactionId).ToListAsync(ct);
         var payment = candidates.FirstOrDefault(x => lookup.Contains(x.TransactionCode, StringComparison.OrdinalIgnoreCase));
         if (payment is null) return; // Do not expose which codes exist to callers.
@@ -153,6 +160,12 @@ public sealed class BillingService(VegetarianDbContext db, SePaySettings sePaySe
         var counters = await db.AiUsageCounters.Where(x => x.UserId == payment.UserId).ToListAsync(ct);
         foreach (var counter in counters) ResetCounter(counter, payment.Plan, now);
         await db.SaveChangesAsync(ct);
+        await notifications.CreateAsync(
+            payment.UserId,
+            "PAYMENT_SUCCESS",
+            $"Thanh toán {payment.Plan.Name} thành công. Gói của bạn đã được kích hoạt đến {now.AddDays(payment.Plan.DurationDays):dd/MM/yyyy HH:mm}.",
+            null,
+            ct);
     }
 
     private async Task<SubscriptionPlan> GetCurrentPlanAsync(int userId, CancellationToken ct)

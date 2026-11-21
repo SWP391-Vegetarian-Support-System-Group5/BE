@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool allergensOnly = false, bool locationOnly = false, bool avatarOnly = false)
+    public static async Task RunAsync(bool locationOnly = false, bool avatarOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -43,7 +43,6 @@ static class AdminApiTests
         builder.Services.AddMemoryCache();
         builder.Services.AddSingleton<ICommunityEventPublisher, TestEvents>();
         builder.Services.AddSingleton<IModerationAiService, MockModerationAiService>();
-        builder.Services.AddSingleton<IAllergenNameValidator, TestAllergenValidator>();
         builder.Services.AddSingleton<IAllergenIngredientMatcher, TestAllergenMatcher>();
         builder.Services.AddSingleton<INotificationEventPublisher, TestNotificationPublisher>();
         builder.Services.AddSingleton<IEmailSender, NoEmail>();
@@ -118,11 +117,6 @@ static class AdminApiTests
             if (locationOnly)
             {
                 await LocationApiTests.RunAsync(client, user);
-                return;
-            }
-            if (allergensOnly)
-            {
-                await AllergenReviewApiTests.RunAsync(client, admin, user);
                 return;
             }
             await SendImage("recipes", 401, null);
@@ -308,11 +302,6 @@ static class AdminApiTests
         public Task SendOtpAsync(string recipientEmail, string purpose, string otpCode, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Email is not part of admin API tests.");
     }
 
-    sealed class TestAllergenValidator : IAllergenNameValidator
-    {
-        public Task<ValidatedAllergenName> ValidateAsync(string input, IReadOnlyCollection<Allergen> existing, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ValidatedAllergenName(input));
-    }
 
     sealed class TestAllergenMatcher : IAllergenIngredientMatcher
     {

@@ -87,11 +87,6 @@ builder.Services.AddHttpClient<IModerationAiService, GeminiModerationAiService>(
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
     client.Timeout = TimeSpan.FromSeconds(40);
 });
-builder.Services.AddHttpClient<IAllergenNameValidator, GeminiAllergenNameValidator>(client =>
-{
-    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
-    client.Timeout = TimeSpan.FromSeconds(40);
-});
 builder.Services.AddHttpClient<IAllergenIngredientMatcher, GeminiAllergenIngredientMatcher>(client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
@@ -225,7 +220,7 @@ builder.Services.AddSwaggerGen(options =>
             "MealPlans" => "Meal Planner",
             "Chat" or "AiFeatures" or "VideoRecipeDrafts" => "AI Assistant",
             "Reports" => "Moderation",
-            "Administration" or "AllergenReview" => "Administration",
+            "Administration" => "Administration",
             "ReferenceData" when path.StartsWith("api/restaurants", StringComparison.OrdinalIgnoreCase) => "Restaurants",
             "Locations" => "Locations",
             "ReferenceData" => "Reference Data",
