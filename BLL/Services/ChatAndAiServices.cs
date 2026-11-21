@@ -22,6 +22,7 @@ public class NutritionChatbotService(
     IAiChatService aiChatService,
     IKnowledgeBaseService knowledgeBaseService,
     IAllergenIngredientMatcher allergenMatcher,
+    IBillingService billing,
     ILogger<NutritionChatbotService>? logger = null) : IChatService
 {
     private const int GuestMessageLimit = 5;
@@ -90,6 +91,8 @@ public class NutritionChatbotService(
         var context = BuildApplicationContext(user, history, relatedRecipes);
         context += $"\n\nRETRIEVED KNOWLEDGE:\n{knowledge.Content}";
         logger?.LogInformation("Chat {SessionId} prepared context in {Seconds} seconds, {Characters} characters.", id, timer.Elapsed.TotalSeconds, context.Length);
+        if (userId.HasValue && !string.Equals(role, "ADMIN", StringComparison.OrdinalIgnoreCase))
+            await billing.ConsumeAsync(userId.Value, BillingService.ChatFeature, cancellationToken);
         var chatbotReply = await aiChatService.ReplyAsync(new(request.Content.Trim(), context), cancellationToken);
         var response = new ChatMessage { ChatSessionId = id, Sender = "AI", Content = chatbotReply.Answer, CreatedAt = VietnamTime.Now };
         await messages.AddAsync(response, cancellationToken);

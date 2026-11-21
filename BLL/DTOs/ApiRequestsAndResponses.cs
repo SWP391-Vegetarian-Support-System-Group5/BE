@@ -17,16 +17,16 @@ public record UserResponse(int UserId, string Email, string Role, string FullNam
 public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
-    string? Sex,
-    [Range(1900, 2100)] int? BirthYear,
-    [Range(1, 300)] decimal? HeightCm,
-    [Range(1, 1000)] decimal? WeightKg,
-    string? ActivityLevel,
-    int? DietTypeId,
-    [Range(-90, 90)] decimal? Latitude,
-    [Range(-180, 180)] decimal? Longitude,
-    [MaxLength(300)] string? LivingAddress = null,
-    [Range(1, 1000)] decimal? GoalWeightKg = null);
+    [Required] string Sex,
+    [Range(1900, 2100)] int BirthYear,
+    [Range(140, 210)] decimal HeightCm,
+    [Range(40, 150)] decimal WeightKg,
+    [Required] string ActivityLevel,
+    [Range(1, int.MaxValue)] int DietTypeId,
+    [Range(-90, 90)] decimal Latitude,
+    [Range(-180, 180)] decimal Longitude,
+    [Required, MaxLength(300)] string LivingAddress,
+    [Range(40, 150)] decimal GoalWeightKg);
 public record UpdateUserLocationRequest(
     [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-90, 90)] decimal Latitude,
@@ -38,6 +38,7 @@ public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
 public record AddCustomAllergenRequest([Required, MinLength(2), MaxLength(80)] string Name);
 public record RejectAllergenSubmissionRequest([Required, MaxLength(1000)] string Reason);
+public record ReviewPostRequest([Required, MaxLength(1000)] string Reason);
 public record AllergenSubmissionResponse(int Id, int UserId, string SubmittedName, string Name, string Status,
     string Message, string? RejectionReason, int? AllergenId, DateTime CreatedAt, DateTime? ReviewedAt, int? ReviewedByUserId);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
@@ -87,5 +88,19 @@ public record PublishVideoRecipeDraftRequest([Required, MaxLength(250)] string R
 public record ReportRequest([Required, MaxLength(500)] string Reason);
 public record ModerationFlagResponse(int FlagId, int? PostId, int? CommentId, string Source, string? Reason, string Status, int? ReportedBy, int? ReviewedBy);
 public record UserNotificationResponse(long Id, string Type, string Message, int? PostId, bool IsRead, DateTime CreatedAt);
+public record SubscriptionPlanRequest([Required, MaxLength(40)] string Code, [Required, MaxLength(120)] string Name,
+    [Range(0, 100_000_000)] decimal PriceVnd, [Range(1, 100_000)] int ChatbotLimit,
+    [Range(1, 100_000)] int AiPostLimit, [Range(1, 24 * 31)] int RefillIntervalHours,
+    [Range(1, 3650)] int DurationDays, bool IsActive = true);
+public record SubscriptionPlanResponse(int SubscriptionPlanId, string Code, string Name, decimal PriceVnd, int ChatbotLimit,
+    int AiPostLimit, int RefillIntervalHours, int DurationDays, bool IsActive);
+public record AiUsageResponse(string PlanCode, string PlanName, bool IsPremium, int ChatbotUsed, int ChatbotLimit,
+    int AiPostUsed, int AiPostLimit, DateTime NextRefillAt, DateTime? SubscriptionExpiresAt);
+public record CreatePaymentRequest([Range(1, int.MaxValue)] int PlanId);
+public record PaymentTransactionResponse(long PaymentTransactionId, string TransactionCode, decimal AmountVnd, string Status,
+    string QrUrl, DateTime ExpiresAt, int PlanId, string PlanName);
+public record SePayWebhookRequest(long? Id, string? Gateway, string? TransactionDate, string? AccountNumber,
+    string? Code, string? Content, string? TransferType, decimal? TransferAmount, string? ReferenceCode,
+    string? Accumulated, string? SubAccount, string? Description);
 public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
     [Range(1, int.MaxValue)] int? EstimatedPrepMinutes, [Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps, [MaxLength(250)] string? RecipeName = null);

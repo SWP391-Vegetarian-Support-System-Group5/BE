@@ -15,7 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Historical migrations are intentionally excluded: some were written
+         for an old SQL Server baseline and must never be discovered by EF
+         when working with the existing Aiven MySQL database. -->
     <Compile Remove="Data\Migrations\**\*.cs" />
+    <!-- Only reviewed, forward MySQL migrations are explicitly included. -->
+    <Compile Include="Data\Migrations\202611210016_AddSubscriptionBillingAndAiUsage.cs" />
   </ItemGroup>
 
 </Project>

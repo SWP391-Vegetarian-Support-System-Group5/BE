@@ -78,7 +78,7 @@ public interface IReferenceDataAndRestaurantService
     Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RestaurantResponse>> GetRestaurantsAsync(string? keyword, CancellationToken cancellationToken = default);
     Task<RestaurantResponse?> GetRestaurantAsync(int id, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? keyword = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? keyword = null, int? userId = null, CancellationToken cancellationToken = default);
     Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default);
     Task UpdateRestaurantAsync(int id, RestaurantRequest request, CancellationToken cancellationToken = default);
     Task DeleteRestaurantAsync(int id, CancellationToken cancellationToken = default);
@@ -92,6 +92,7 @@ public interface IPostService
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
+    Task ReviewManualPostAsync(int id, int adminId, bool approve, string? rejectionReason, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddCommentAsync(int postId, int userId, int? parentCommentId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<CommentResponse> AddReplyAsync(int parentCommentId, int userId, CommentRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default);
@@ -113,7 +114,7 @@ public interface IRecipeService
     Task<RecipeResponse> GetAsync(int id, CancellationToken cancellationToken = default, int? actorId = null, string? role = null);
     Task UpdateAsync(int id, int actorId, string role, CreateRecipeRequest request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, int? userId = null, CancellationToken cancellationToken = default);
 }
 
 public interface IMealPlanService

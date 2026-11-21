@@ -79,15 +79,27 @@ public class ReferenceDataAndRestaurantService(
         var entity = await restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).SingleOrDefaultAsync(x => x.RestaurantId == id, cancellationToken);
         return entity is null ? null : ToRestaurant(entity);
     }
-    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? keyword = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<RestaurantResponse>> GetNearbyRestaurantsAsync(decimal latitude, decimal longitude, decimal radiusKm, int? dietTypeId = null, string? keyword = null, int? userId = null, CancellationToken cancellationToken = default)
     {
         if (radiusKm <= 0) throw new ServiceException("Radius must be greater than zero.");
+        int[] allergenIds = [];
+        string[]? userAllowedGroups = null;
+        if (userId.HasValue)
+        {
+            var profile = await db.UserProfiles.Include(x => x.DietType).AsNoTracking().SingleOrDefaultAsync(x => x.UserId == userId.Value, cancellationToken);
+            if (profile?.DietType is not null)
+            {
+                dietTypeId = profile.DietTypeId;
+                userAllowedGroups = VegetarianDietRules.GetAllowedGroups(profile.DietType.Name).ToArray();
+            }
+            allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
+        }
         if (dietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken))
             throw new ServiceException("Diet type was not found.", 404);
-        var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes)
+        var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).ThenInclude(x => x.DietType)
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Where(x => x.Latitude.HasValue && x.Longitude.HasValue);
-        if (dietTypeId.HasValue)
+        if (dietTypeId.HasValue && userAllowedGroups is null)
             query = query.Where(x => x.DietTypes.Any(item => item.DietTypeId == dietTypeId.Value));
         if (!string.IsNullOrWhiteSpace(keyword))
         {
@@ -97,7 +109,11 @@ public class ReferenceDataAndRestaurantService(
                 || x.Ingredients.Any(item => item.Ingredient.Name.ToLower().Contains(term)));
         }
         var candidates = await query.ToListAsync(cancellationToken);
-        return candidates.Where(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value) <= radiusKm).OrderBy(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value)).Select(ToRestaurant).ToList();
+        return candidates
+            .Where(x => userAllowedGroups is null || x.DietTypes.Any(d => VegetarianDietRules.GetAllowedGroups(d.DietType.Name).All(userAllowedGroups.Contains)))
+            .Where(x => allergenIds.Length == 0 || !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value)))
+            .Where(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value) <= radiusKm)
+            .OrderBy(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value)).Select(ToRestaurant).ToList();
     }
     public async Task<RestaurantResponse> CreateRestaurantAsync(RestaurantRequest request, CancellationToken cancellationToken = default)
     {

@@ -31,7 +31,7 @@ DAL/    23 entity mappings, VegetarianDbContext, repositories
 
 ## Database
 
-The application maps the existing `VegetarianSupportSystemDB` schema. On startup, EF Core automatically applies pending migrations before seed data is checked. The migrations remove discontinued nutrition-calculation fields, secure guest chat sessions, and add the RAG Vector Store configuration table.
+The application maps the existing `VegetarianSupportSystemDB` schema. It never changes the schema automatically on startup; apply reviewed migrations deliberately before deployment.
 
 The Gemini and SendGrid API keys are stored in `API/.env`, which is ignored by Git. Copy `API/.env.example` to `API/.env` and replace its placeholders:
 
@@ -63,6 +63,8 @@ dotnet run --project API/API.csproj
 Swagger in Development: `http://localhost:5000/swagger` or the launch-profile URL shown by `dotnet run`.
 
 The API never modifies the database schema at startup. Apply any future schema change explicitly through a reviewed migration or a one-off maintenance command before deploying the API. This prevents a running web service from executing `ALTER`, `DROP`, or data backfill operations when Render restarts an instance.
+
+Historical migration files are intentionally excluded from the compiled EF migration assembly because the Aiven MySQL database is already the baseline and some old files contain SQL Server-specific changes. Do **not** run the old files. The only retained forward migration is `202611210016_AddSubscriptionBillingAndAiUsage` for plans, subscriptions, payment transactions, and AI usage counters.
 
 The location catalogue is embedded in the BLL and does not require SQL Server. It contains all 34 provincial-level units and all 3,321 commune-level units effective from 1 July 2025 under Decision 19/2025/QD-TTg. Each area uses its official five-digit administrative code. The source PDFs and generated catalogue can be validated again with `scripts/extract_administrative_areas.py`.
 
@@ -97,6 +99,20 @@ Passwords are PBKDF2-SHA256 hashes. API responses never expose `PasswordHash`.
 - Video recipe AI: `/api/video-recipe-drafts` uploads a cooking video, creates a Gemini-generated editable recipe draft, then publishes it as a recipe
 - Moderation: `/api/reports/*`, `/api/admin/moderation/*`
 - Admin: users, content moderation, categories, diet types, allergens, restaurants
+- Billing: `/api/billing/plans`, `/api/billing/usage`, `/api/billing/payments`; admins manage plans at `/api/admin/subscription-plans`.
+
+## Enable SePay payment
+
+The app creates a unique VietQR transfer code for each purchase and only activates a plan after the SePay webhook confirms the matching amount. Set these backend environment variables in Render (do not commit real values):
+
+```dotenv
+SePay__AccountNumber="linked bank account number"
+SePay__BankCode="bank code used by VietQR/SePay"
+SePay__WebhookApiKey="secret API key configured in SePay webhook"
+SePay__PaymentExpiryMinutes=15
+```
+
+In SePay, register the public webhook URL as `https://YOUR-BACKEND/api/payments/sepay/webhook`, configure the same API key, and subscribe to incoming-credit transaction events. Apply migration `202611210016_AddSubscriptionBillingAndAiUsage` before enabling these routes; it creates plans, subscriptions, payment transactions, and usage counters.
 
 ## Verification
 
