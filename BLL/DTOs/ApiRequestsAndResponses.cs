@@ -97,6 +97,6 @@ public record PaymentTransactionResponse(long PaymentTransactionId, string Trans
     string QrUrl, DateTime ExpiresAt, int PlanId, string PlanName);
 public record SePayWebhookRequest(long? Id, string? Gateway, string? TransactionDate, string? AccountNumber,
     string? Code, string? Content, string? TransferType, decimal? TransferAmount, string? ReferenceCode,
-    string? Accumulated, string? SubAccount, string? Description);
+    decimal? Accumulated, string? SubAccount, string? Description);
 public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
     [Range(1, int.MaxValue)] int? EstimatedPrepMinutes, [Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps, [MaxLength(250)] string? RecipeName = null);
