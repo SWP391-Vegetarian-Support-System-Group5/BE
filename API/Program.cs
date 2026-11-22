@@ -82,7 +82,9 @@ builder.Services.AddHttpClient<IAllergenIngredientMatcher, GeminiAllergenIngredi
 builder.Services.AddHttpClient("GeminiFiles", client =>
 {
     client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
-    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(geminiSettings.MediaRequestTimeoutSeconds, 30, 300));
+    // The HTTP client must not cancel generation before its own configured deadline.
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(Math.Clamp(geminiSettings.MediaRequestTimeoutSeconds, 30, 300),
+        Math.Clamp(geminiSettings.VideoGenerationTimeoutSeconds, 10, 180) + 5));
 });
 builder.Services.AddHttpClient("SendGrid", client => client.BaseAddress = new Uri("https://api.sendgrid.com/v3/"));
 builder.Services.AddHttpClient("Photon", client =>

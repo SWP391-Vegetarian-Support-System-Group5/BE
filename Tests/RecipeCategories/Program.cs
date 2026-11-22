@@ -127,6 +127,12 @@ if (args.Contains("--reset-aiven-keep-admin"))
     return;
 }
 
+if (args.Contains("--ai-recipe-review"))
+{
+    await GeminiReviewTests.RunAsync();
+    return;
+}
+
 if (args.Contains("--video-analysis"))
 {
     await VideoAnalysisTests.RunAsync();
@@ -240,7 +246,16 @@ var created = await recipeService.CreateAsync(1, request);
 Check(created.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/rice.jpg" && created.ThumbnailUrl == created.ImageUrl, "recipe image stored and used as thumbnail");
 Check(created.Categories.Count == 1, "create recipe persists selected category");
 Check((await recipeService.SearchAsync(null, dinner.Id, null)).Any(r => r.PostId == created.PostId), "recipe search by category");
-await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Cheese", "50g", "DAIRY", null)], CategoryIds = [], ImageUrl = "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" });
+await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Cheese", "50g", "DAIRY", null)], CategoryIds = [], AnimalDerivedIngredientsConfirmed = true, ImageUrl = "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" });
+try
+{
+    await recipeService.UpdateAsync(created.PostId, 1, "USER", request with { Ingredients = [new("Honey", "1 tsp", "HONEY", null)] });
+    throw new Exception("Unconfirmed honey was accepted.");
+}
+catch (ServiceException error) when (error.StatusCode == 409 && error.Errors.Contains("ANIMAL_DERIVED_CONFIRMATION_REQUIRED"))
+{
+    Check((await recipeService.GetAsync(created.PostId)).Ingredients.Single().IngredientName == "Cheese", "unconfirmed animal-derived ingredients do not mutate an existing recipe");
+}
 var updated = await recipeService.GetAsync(created.PostId);
 Check(updated.ImageUrl == "https://res.cloudinary.com/test/image/upload/v1/cheese.jpg" && updated.ThumbnailUrl == updated.ImageUrl, "recipe image updated");
 Check(updated.Categories.Count == 0, "editing recipe removes unselected category");

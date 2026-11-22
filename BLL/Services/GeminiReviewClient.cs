@@ -23,7 +23,8 @@ internal static class GeminiReviewClient
             : new[] { primary, fallback, primary };
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(35));
+        var attemptSeconds = Math.Clamp(settings.ReviewAttemptTimeoutSeconds, 10, 30);
+        deadline.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.ReviewTotalTimeoutSeconds, attemptSeconds, 120)));
         Failure lastFailure = new("AI đang bận hoặc không phản hồi. Dữ liệu chưa được lưu; vui lòng thử lại sau.");
         for (var attempt = 0; attempt < models.Length; attempt++)
         {
@@ -35,7 +36,7 @@ internal static class GeminiReviewClient
                 catch (OperationCanceledException) { break; }
             }
             using var oneAttempt = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
-            oneAttempt.CancelAfter(TimeSpan.FromSeconds(10));
+            oneAttempt.CancelAfter(TimeSpan.FromSeconds(attemptSeconds));
             var model = models[attempt];
             using var request = new HttpRequestMessage(HttpMethod.Post, $"models/{model}:generateContent");
             request.Headers.Add("x-goog-api-key", settings.ApiKey);
