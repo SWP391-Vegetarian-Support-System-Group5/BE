@@ -594,6 +594,7 @@ public sealed class VideoRecipeDraftService(
         // ingredients and steps immediately below when it creates or updates the recipe.
         if (!VegetarianDietRules.IsVerifiedVegetarianRecipe(draft.Ingredients.Select(x => x.DietaryGroup)))
             throw new ServiceException("Bản nháp có nguyên liệu không chay hoặc chưa xác minh. Không thể đăng công thức.", 422);
+        RecipeService.RequireAnimalDerivedConfirmation(draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)), request.AnimalDerivedIngredientsConfirmed);
         draft.CaloriesPerServing ??= VideoRecipeCalorieEstimator.EstimatePerServing(draft.Ingredients.Select(item => new IngredientRequest(item.IngredientName, item.Amount, item.DietaryGroup, item.AllergenId)));
         if (!LocalVideoStorage.IsCloudVideo(draft.VideoUrl))
         {
@@ -601,7 +602,7 @@ public sealed class VideoRecipeDraftService(
             draft.UpdatedAt = VietnamTime.Now;
             await drafts.SaveChangesAsync(ct);
         }
-        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, null, draft.CaloriesPerServing);
+        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, null, draft.CaloriesPerServing, AnimalDerivedIngredientsConfirmed: request.AnimalDerivedIngredientsConfirmed);
         RecipeResponse recipe;
         if (draft.RecipePostId.HasValue)
         {

@@ -29,7 +29,7 @@ public class RecipeService(
         await ValidateRelationsAsync(request, cancellationToken);
         // Manual member recipes are reviewed by an administrator. AI-created recipes keep AI moderation.
         var requiresAdminReview = request.RequiresAdminReview && role != "ADMIN";
-        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagRecipeReasonAsync(ModerationText(request), request.AnimalDerivedIngredientsConfirmed, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         var now = VietnamTime.Now;
@@ -65,7 +65,7 @@ public class RecipeService(
         await ValidateRelationsAsync(request, cancellationToken);
         // A resubmitted manual recipe goes back to the administrator, while AI recipes retain AI moderation.
         var requiresAdminReview = request.RequiresAdminReview && role != "ADMIN";
-        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagReasonAsync(ModerationText(request), cancellationToken);
+        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagRecipeReasonAsync(ModerationText(request), request.AnimalDerivedIngredientsConfirmed, cancellationToken);
         var wasPublished = recipe.Post.Status == "PUBLISHED";
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
@@ -172,7 +172,16 @@ public class RecipeService(
         if (string.IsNullOrWhiteSpace(request.RecipeName) || request.RecipeName.Trim().Length > 250) throw new ServiceException("Recipe name is required and must not exceed 250 characters.");
         if ((request.Steps ?? []).GroupBy(x => x.StepNumber).Any(g => g.Count() > 1)) throw new ServiceException("Recipe step numbers must be unique.");
         if (request.Servings is <= 0) throw new ServiceException("Servings must be greater than zero.");
+        RequireAnimalDerivedConfirmation(request.Ingredients ?? [], request.AnimalDerivedIngredientsConfirmed);
         if (request.Ingredients is not { Count: > 0 }) throw new ServiceException("A recipe must include at least one classified ingredient.");
+    }
+    internal static void RequireAnimalDerivedConfirmation(IEnumerable<IngredientRequest> ingredients, bool confirmed)
+    {
+        var names = ingredients.Where(i => i.DietaryGroup.Trim().ToUpperInvariant() is "HONEY" or "DAIRY" or "EGG")
+            .Select(i => i.IngredientName).Distinct().ToArray();
+        if (!confirmed && names.Length > 0)
+            throw new ServiceException("Vui lòng xác nhận sử dụng nguyên liệu có nguồn gốc động vật (mật ong, trứng, sữa) trước khi đăng.", 409,
+                new[] { "ANIMAL_DERIVED_CONFIRMATION_REQUIRED" }.Concat(names).ToArray());
     }
     private static void EnsureOwner(int ownerId, int actorId, string role) { if (ownerId != actorId && role != "ADMIN") throw new ServiceException("You do not have permission to modify this recipe.", 403); }
 }

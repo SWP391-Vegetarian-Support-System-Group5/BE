@@ -202,7 +202,9 @@ public sealed class GeminiChatbotSettings
     public string ApiKey { get; init; } = string.Empty;
     public string Model { get; init; } = "gemini-3.5-flash-lite";
     public string VideoFallbackModel { get; init; } = "gemini-3.1-flash-lite";
-    public int VideoGenerationTimeoutSeconds { get; init; } = 90;
+    public int VideoGenerationTimeoutSeconds { get; init; } = 120;
+    public int ReviewAttemptTimeoutSeconds { get; init; } = 20;
+    public int ReviewTotalTimeoutSeconds { get; init; } = 65;
     public string ChatModel { get; init; } = "gemini-3.1-flash-lite";
     public int ChatTimeoutSeconds { get; init; } = 45;
     public int MediaRequestTimeoutSeconds { get; init; } = 120;

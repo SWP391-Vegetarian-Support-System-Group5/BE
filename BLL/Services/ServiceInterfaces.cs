@@ -145,7 +145,12 @@ public interface IVideoRecipeDraftService
     Task ProcessPendingAsync(CancellationToken cancellationToken = default);
     Task<VideoRecipeDraftResponse> CreateManualAsync(int userId, Stream videoStream, string fileName, string contentType, CreateManualVideoRecipeDraftRequest request, CancellationToken ct = default);
 }
-public interface IModerationAiService { Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default); }
+public interface IModerationAiService
+{
+    Task<string?> FlagReasonAsync(string content, CancellationToken cancellationToken = default);
+    Task<string?> FlagRecipeReasonAsync(string content, bool animalDerivedIngredientsConfirmed, CancellationToken cancellationToken = default)
+        => FlagReasonAsync(content, cancellationToken);
+}
 public interface INotificationEventPublisher { Task SendAsync(int userId, UserNotificationResponse notification, CancellationToken cancellationToken = default); }
 public interface IUserNotificationService
 {
