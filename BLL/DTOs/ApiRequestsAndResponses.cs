@@ -17,16 +17,16 @@ public record UserResponse(int UserId, string Email, string Role, string FullNam
 public record AdminUserActivityResponse(int UserId, int Posts, int Videos, int Comments, int Saved, int Recipes, int Ratings, DateTime? LastActivityAt, IReadOnlyList<int> DailyContributions);
 public record UpdateUserProfileRequest(
     [Required, MaxLength(150)] string FullName,
-    string? Sex,
-    [Range(1900, 2100)] int? BirthYear,
-    [Range(1, 300)] decimal? HeightCm,
-    [Range(1, 1000)] decimal? WeightKg,
-    string? ActivityLevel,
-    int? DietTypeId,
-    [Range(-90, 90)] decimal? Latitude,
-    [Range(-180, 180)] decimal? Longitude,
-    [MaxLength(300)] string? LivingAddress = null,
-    [Range(1, 1000)] decimal? GoalWeightKg = null);
+    [Required] string Sex,
+    [Range(1900, 2100)] int BirthYear,
+    [Range(140, 210)] decimal HeightCm,
+    [Range(40, 150)] decimal WeightKg,
+    [Required] string ActivityLevel,
+    [Range(1, int.MaxValue)] int DietTypeId,
+    [Range(-90, 90)] decimal Latitude,
+    [Range(-180, 180)] decimal Longitude,
+    [Required, MaxLength(300)] string LivingAddress,
+    [Range(40, 150)] decimal GoalWeightKg);
 public record UpdateUserLocationRequest(
     [property: System.Text.Json.Serialization.JsonRequired]
     [Range(-90, 90)] decimal Latitude,
@@ -36,10 +36,7 @@ public record UpdateUserLocationRequest(
 public record AuthResponse(string Token, UserResponse User);
 public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
-public record AddCustomAllergenRequest([Required, MinLength(2), MaxLength(80)] string Name);
-public record RejectAllergenSubmissionRequest([Required, MaxLength(1000)] string Reason);
-public record AllergenSubmissionResponse(int Id, int UserId, string SubmittedName, string Name, string Status,
-    string Message, string? RejectionReason, int? AllergenId, DateTime CreatedAt, DateTime? ReviewedAt, int? ReviewedByUserId);
+public record ReviewPostRequest([Required, MaxLength(1000)] string Reason);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
 public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups);
 public record AllergenRequest([Required, MaxLength(150)] string Name);
@@ -64,7 +61,7 @@ public record IngredientCategoryRequest([Required, MaxLength(30)] string Code, [
 public record IngredientResponse(int Id, string Name, int IngredientCategoryId, string DietaryGroup, int? AllergenId);
 public record UpdateIngredientRequest([Required, MaxLength(200)] string Name, [Range(1, int.MaxValue)] int IngredientCategoryId, int? AllergenId);
 public record RecipeStepRequest([Range(1, int.MaxValue)] int StepNumber, [Required] string Instruction);
-public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, [Required, MaxLength(250)] string RecipeName, List<int>? CategoryIds = null, [MaxLength(1000)] string? ImageUrl = null, [Range(1, 10000)] decimal? CaloriesPerServing = null, bool AnimalDerivedIngredientsConfirmed = false);
+public record CreateRecipeRequest([Required, MaxLength(250)] string Title, [Required] string Content, string? VideoUrl, [Range(1, int.MaxValue)] int? PrepMinutes, [Range(1, int.MaxValue)] int? CookMinutes, [Range(0.01, 1000)] decimal? Servings, List<IngredientRequest>? Ingredients, List<RecipeStepRequest>? Steps, [Required, MaxLength(250)] string RecipeName, List<int>? CategoryIds = null, [MaxLength(1000)] string? ImageUrl = null, [Range(1, 10000)] decimal? CaloriesPerServing = null, bool AnimalDerivedIngredientsConfirmed = false, bool RequiresAdminReview = false);
 public record RecipeResponse(int PostId, string Title, string Content, string Status, string? VideoUrl, string? ThumbnailUrl, int? PrepMinutes, int? CookMinutes, decimal? Servings, IReadOnlyCollection<IngredientRequest> Ingredients, IReadOnlyCollection<RecipeStepRequest> Steps, IReadOnlyCollection<int> CompatibleDietTypeIds, string RecipeName, IReadOnlyCollection<RecipeCategoryResponse> Categories, string? ModerationReason = null, string? ImageUrl = null, decimal? CaloriesPerServing = null);
 public record UpdateRecipeCategoryMappingsRequest([Required] List<int> CategoryIds);
 public record RecipeCategoryResponse(int Id, string Name, bool IsActive, DateTime CreatedAt);
@@ -87,5 +84,24 @@ public record PublishVideoRecipeDraftRequest([Required, MaxLength(250)] string R
 public record ReportRequest([Required, MaxLength(500)] string Reason);
 public record ModerationFlagResponse(int FlagId, int? PostId, int? CommentId, string Source, string? Reason, string Status, int? ReportedBy, int? ReviewedBy);
 public record UserNotificationResponse(long Id, string Type, string Message, int? PostId, bool IsRead, DateTime CreatedAt);
+public record SubscriptionPlanRequest([Required, MaxLength(40)] string Code, [Required, MaxLength(120)] string Name,
+    [Range(0, 100_000_000)] decimal PriceVnd, [Range(1, 100_000)] int ChatbotLimit,
+    [Range(1, 100_000)] int AiPostLimit, [Range(1, 24 * 31)] int RefillIntervalHours,
+    [Range(1, 3650)] int DurationDays, bool IsActive = true);
+public record SubscriptionPlanResponse(int SubscriptionPlanId, string Code, string Name, decimal PriceVnd, int ChatbotLimit,
+    int AiPostLimit, int RefillIntervalHours, int DurationDays, bool IsActive);
+public record AiUsageResponse(string PlanCode, string PlanName, bool IsPremium, int ChatbotUsed, int ChatbotLimit,
+    int AiPostUsed, int AiPostLimit, DateTime NextRefillAt, DateTime? SubscriptionExpiresAt);
+public record CreatePaymentRequest([Range(1, int.MaxValue)] int PlanId);
+public record PaymentTransactionResponse(long PaymentTransactionId, string TransactionCode, decimal AmountVnd, string Status,
+    string QrUrl, DateTime ExpiresAt, int PlanId, string PlanName);
+public record SePayWebhookRequest(long? Id, string? Gateway, string? TransactionDate, string? AccountNumber,
+    string? Code, string? Content, string? TransferType, decimal? TransferAmount, string? ReferenceCode,
+    decimal? Accumulated, string? SubAccount, string? Description);
+public record SePayWebhookResponse(bool Matched, bool Activated, long? PaymentTransactionId, string Message);
+public record PaymentPurchaseResponse(long PaymentTransactionId, int UserId, string UserName, string UserEmail,
+    string PlanName, decimal AmountVnd, DateTime PurchasedAt, string TransactionCode);
+public record PaymentRevenueResponse(decimal TotalRevenueVnd, int PaidTransactionCount,
+    IReadOnlyCollection<PaymentPurchaseResponse> Purchases);
 public record CreateManualVideoRecipeDraftRequest([Required, MaxLength(250)] string Title,[Required] string Description,string? Transcript,
     [Range(1, int.MaxValue)] int? EstimatedPrepMinutes, [Required] List<IngredientRequest> Ingredients, [Required] List<RecipeStepRequest> Steps, [MaxLength(250)] string? RecipeName = null);

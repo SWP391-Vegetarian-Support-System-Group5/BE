@@ -518,11 +518,13 @@ public sealed class VideoRecipeDraftService(
     LocalVideoStorage storage,
     IVideoRecipeAnalyzer analyzer,
     IRecipeService recipes,
+    IBillingService billing,
     Microsoft.Extensions.Logging.ILogger<VideoRecipeDraftService> logger,
     VideoRecipeSettings settings) : IVideoRecipeDraftService
 {
     public async Task<VideoRecipeDraftResponse> CreateAsync(int userId, Stream video, string fileName, string contentType, CancellationToken ct = default)
     {
+        await billing.ConsumeAsync(userId, BillingService.AiPostFeature, ct);
         var videoUrl = await storage.StageAsync(video, fileName, ct);
         var draft = new VideoRecipeDraft { UserId = userId, VideoUrl = videoUrl, Status = "PENDING", CreatedAt = VietnamTime.Now, UpdatedAt = VietnamTime.Now };
         try
@@ -573,6 +575,8 @@ public sealed class VideoRecipeDraftService(
     {
         var draft = await GetOwnedDraftAsync(id, userId, role, ct);
         if (draft.Status != "FAILED") throw new ServiceException("Only a failed video draft can be retried.", 409);
+        if (!string.Equals(role, "ADMIN", StringComparison.OrdinalIgnoreCase))
+            await billing.ConsumeAsync(userId, BillingService.AiPostFeature, ct);
         if (!LocalVideoStorage.IsCloudVideo(draft.VideoUrl))
             await storage.PrepareForProcessingAsync(draft.VideoUrl, ct);
         draft.Status = "PENDING"; draft.ErrorMessage = null; draft.UpdatedAt = VietnamTime.Now;
@@ -598,7 +602,7 @@ public sealed class VideoRecipeDraftService(
             draft.UpdatedAt = VietnamTime.Now;
             await drafts.SaveChangesAsync(ct);
         }
-        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, null, draft.CaloriesPerServing, request.AnimalDerivedIngredientsConfirmed);
+        var recipeRequest = new CreateRecipeRequest(draft.Title ?? "Video recipe", draft.Description ?? string.Empty, draft.VideoUrl, draft.EstimatedPrepMinutes, null, null, draft.Ingredients.Select(x => new IngredientRequest(x.IngredientName, x.Amount, x.DietaryGroup, x.AllergenId)).ToList(), draft.Steps.OrderBy(x => x.StepNumber).Select(x => new RecipeStepRequest(x.StepNumber, x.Instruction)).ToList(), request.RecipeName, request.CategoryIds, null, draft.CaloriesPerServing, AnimalDerivedIngredientsConfirmed: request.AnimalDerivedIngredientsConfirmed);
         RecipeResponse recipe;
         if (draft.RecipePostId.HasValue)
         {

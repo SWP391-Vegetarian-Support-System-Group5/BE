@@ -52,7 +52,7 @@ public class RecipesController(IRecipeService recipeService) : ControllerBase
 {
     [Authorize]
     [HttpPost] public async Task<ActionResult<RecipeResponse>> Create(CreateRecipeRequest request, CancellationToken ct) { var recipe = await recipeService.CreateAsync(User.GetRequiredUserId(), request, ct, User.GetRoleName()); return Created($"/api/recipes/{recipe.PostId}", recipe); }
-    [HttpGet("search")] public Task<IReadOnlyCollection<RecipeResponse>> Search([FromQuery] string? keyword, [FromQuery] int? category, [FromQuery] string? categoryType, CancellationToken ct) => recipeService.SearchAsync(keyword, category, categoryType, ct);
+    [HttpGet("search")] public Task<IReadOnlyCollection<RecipeResponse>> Search([FromQuery] string? keyword, [FromQuery] int? category, [FromQuery] string? categoryType, CancellationToken ct) => recipeService.SearchAsync(keyword, category, categoryType, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, ct);
     [HttpGet("{id:int}")] public Task<RecipeResponse> Get(int id, CancellationToken ct) => recipeService.GetAsync(id, ct, User.Identity?.IsAuthenticated == true ? User.GetRequiredUserId() : null, User.Identity?.IsAuthenticated == true ? User.GetRoleName() : null);
     [Authorize]
     [HttpPut("{id:int}")] public async Task<IActionResult> Update(int id, CreateRecipeRequest request, CancellationToken ct) { await recipeService.UpdateAsync(id, User.GetRequiredUserId(), User.GetRoleName(), request, ct); return NoContent(); }

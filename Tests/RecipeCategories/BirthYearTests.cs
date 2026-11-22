@@ -21,14 +21,15 @@ static class BirthYearTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         db.Users.Add(new User { UserId = 1, Email = "test@example.invalid", PasswordHash = "unused",
             Profile = new UserProfile { FullName = "Test", BirthYear = 2000 } });
+        db.DietTypes.Add(new DietType { DietTypeId = 1, Name = "VEGAN" });
         await db.SaveChangesAsync();
         var service = new UserProfileService(new Repository<UserProfile>(db), new Repository<DietType>(db));
-        var request = new UpdateUserProfileRequest("Test", null, 2003, 170, 60, "MODERATE", null, null, null);
+        var request = new UpdateUserProfileRequest("Test", "MALE", 2003, 170, 60, "MODERATE", 1, 10.8m, 106.7m, "Thu Duc", 60);
         var response = await service.UpdateAsync(1, request);
         Check(response.BirthYear == 2003 && (await db.UserProfiles.SingleAsync()).BirthYear == 2003, "profile saves and returns year");
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
         Check(json.RootElement.GetProperty("birthYear").GetInt32() == 2003 && !json.RootElement.TryGetProperty("birthDate", out _), "API returns numeric birthYear");
-        foreach (var invalid in new[] { 0, VietnamTime.Now.Year + 1 })
+        foreach (var invalid in new[] { 0, VietnamTime.Now.Year + 1, VietnamTime.Now.Year - 17, VietnamTime.Now.Year - 121 })
         {
             try
             {
@@ -38,7 +39,7 @@ static class BirthYearTests
             catch (ServiceException ex) when (ex.StatusCode == 400) { }
         }
         Check((await db.UserProfiles.SingleAsync()).BirthYear == 2003, "invalid years leave saved profile unchanged");
-        Check((await service.UpdateAsync(1, request with { BirthYear = null })).BirthYear is null, "year remains optional");
+        Check((await service.UpdateAsync(1, request with { BirthYear = VietnamTime.Now.Year - 18 })).BirthYear == VietnamTime.Now.Year - 18, "required year accepts the adult age boundary");
     }
 
     private static void Check(bool condition, string message)

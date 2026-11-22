@@ -30,28 +30,17 @@ if (args.Contains("--verify-allergen-selection-mysql"))
     return;
 }
 
-if (args.Contains("--apply-allergen-review-schema") || args.Contains("--verify-allergen-review-schema"))
-{
-    try { await AllergenReviewSchema.RunAsync(args.Contains("--apply-allergen-review-schema")); }
-    catch (Exception error)
-    {
-        Console.Error.WriteLine($"Allergen review schema operation failed ({error.GetType().Name}). No credentials are printed.");
-        Environment.ExitCode = 1;
-    }
-    return;
-}
-
 if (args.Contains("--birth-year"))
 {
     await BirthYearTests.RunAsync();
     return;
 }
 
-if (args.Contains("--admin-api") || args.Contains("--allergen-review") || args.Contains("--location-api") || args.Contains("--avatar-api"))
+if (args.Contains("--admin-api") || args.Contains("--location-api") || args.Contains("--avatar-api"))
 {
     try
     {
-        await AdminApiTests.RunAsync(allergensOnly: args.Contains("--allergen-review"), locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"));
+        await AdminApiTests.RunAsync(locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"));
     }
     catch (Exception error)
     {
@@ -282,8 +271,11 @@ Check(events.Items.Last() == "postUpdated" && events.Items.Count == 3, "shared i
 try
 {
     await NotificationTests.RunAsync();
-    await CustomAllergenTests.RunAsync();
     await GeminiReviewTests.RunAsync();
+    var manual = await recipeService.CreateAsync(1, request with { Title = "Manual recipe", RequiresAdminReview = true });
+    Check(manual.Status == "PENDING_REVIEW", "manual recipes retain main's administrator review flow");
+    await recipeService.UpdateAsync(manual.PostId, 1, "ADMIN", request with { RequiresAdminReview = true });
+    Check((await recipeService.GetAsync(manual.PostId)).Status == "PUBLISHED", "administrator can publish a reviewed recipe");
 }
 catch (Exception error)
 {

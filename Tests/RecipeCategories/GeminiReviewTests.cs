@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using BLL.Common;
 using BLL.Services;
-using DAL.Entities;
 
 static class GeminiReviewTests
 {
@@ -74,28 +73,17 @@ static class GeminiReviewTests
         catch (ServiceException error) when (error.StatusCode == 503)
         { Check(true, "AI outage is a retryable service error, not a content violation flag"); }
 
-        var allergyResponses = new Queue<HttpStatusCode>([HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK]);
-        using var allergyClient = new HttpClient(new StubHandler(_ => Reply(allergyResponses.Dequeue(),
-            new { allowed = true, name = "Dừa", duplicateOf = "", reason = "" }))) { BaseAddress = new Uri("https://example.invalid/v1beta/") };
-        var validator = new GeminiAllergenNameValidator(allergyClient, settings);
-        Check((await validator.ValidateAsync("Dừa", [new Allergen { Name = "Trứng" }])).Name == "Dừa",
-            "custom allergy is accepted after a transient 503");
-
-        var safetyJson = JsonSerializer.Serialize(new { candidates = new[] { new { finishReason = "SAFETY" } } });
-        using var safetyClient = new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        { Content = new StringContent(safetyJson, Encoding.UTF8, "application/json") })) { BaseAddress = new Uri("https://example.invalid/v1beta/") };
-        var safetyValidator = new GeminiAllergenNameValidator(safetyClient, settings);
-        try { await safetyValidator.ValidateAsync("bầu trời", []); throw new Exception("Expected AI safety refusal"); }
-        catch (ServiceException error) when (error.StatusCode == 422)
-        { Check(error.Message.Contains("bộ lọc an toàn"), "AI safety block is explained instead of reported as outage"); }
-
         var unauthorizedCalls = 0;
         using var unauthorizedClient = new HttpClient(new StubHandler(_ =>
         { unauthorizedCalls++; return Reply(HttpStatusCode.Forbidden, new { allowed = true }); })) { BaseAddress = new Uri("https://example.invalid/v1beta/") };
-        var unauthorized = new GeminiAllergenNameValidator(unauthorizedClient, settings);
-        try { await unauthorized.ValidateAsync("Dừa", []); throw new Exception("Expected configuration failure"); }
+        try
+        {
+            await new GeminiModerationAiService(unauthorizedClient, settings).FlagReasonAsync("Rice recipe");
+            throw new Exception("Expected configuration failure");
+        }
         catch (ServiceException error) when (error.StatusCode == 503)
-        { Check(unauthorizedCalls == 1 && error.Message.Contains("quyền truy cập"), "403 stops without pointless retries"); }
+        { Check(unauthorizedCalls == 1, "403 stops without pointless retries"); }
+
     }
 
     private static HttpResponseMessage Reply(HttpStatusCode status, object decision)
