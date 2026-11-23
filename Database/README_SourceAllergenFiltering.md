@@ -3,7 +3,7 @@
 ## Cause and behavior
 The old `Ingredient.AllergenId` represented only one allergy. Feed/search checked that nullable field, so missing source relations (soy-derived tofu, animal-milk yogurt) passed. Planner/chat then used different name/AI checks; chat could limit candidates before those checks. A matching dish name could therefore receive a different result on different screens.
 
-`PersonalRecipeFilter` now uses stored diet + current user allergy IDs, legacy relation + all `IngredientAllergens` relations, and complete-profile verification. ANY matching selected allergen excludes a recipe. With saved allergies, an unverified ingredient excludes the recipe too. No inference from generic tofu/yogurt names, title, transcript or an AI safety verdict is accepted. Without saved allergies the allergy restriction is removed; publication, classified vegetarian ingredients and saved diet compatibility still apply.
+`PersonalRecipeFilter` now uses stored diet + current user allergy IDs, legacy relation + all `IngredientAllergens` relations. ANY matching selected allergen excludes a recipe. As clarified by the product owner, incomplete profile verification alone does not exclude a recipe, including in Meal Planner. Adding allergy selections progressively removes matching dishes; removing selections restores otherwise eligible dishes. No inference from generic tofu/yogurt names, title, transcript or an AI safety verdict is accepted. Without saved allergies the allergy restriction is removed; publication, classified vegetarian ingredients and saved diet compatibility still apply.
 
 Applies before keyword/category/rating order/limits in public posts (including VIDEO with linked recipe), recipe search, bookmarks and chatbot-related recipes. Planner generation/options/explicit replacement and existing-plan validation use the same rule. Admin list and author's management list are unaffected. Details remain accessible to owners/admin for correction.
 
@@ -34,7 +34,7 @@ Migration: `202611230001_AddVerifiedIngredientAllergens`, explicitly included in
 - Does NOT mark a partial legacy relation as a complete source audit.
 - No bulk name-based source assignment or production data change is performed.
 - Automatic Down is refused because dropping the link table would lose multiple relations. Supply a reviewed preservation/backup procedure.
-Review/apply this migration separately in a test database before rollout; no startup auto-migration was added. Existing allergy users may receive [] until eligible ingredients are reviewed. This is intentional withholding of unknown sources, not a fallback.
+Review/apply this migration separately in a test database before rollout; no startup auto-migration was added. Migration defaults remain unverified; this flag is review metadata, not a filter gate. Empty results occur when all candidates fail recorded allergy matches or the existing diet/publication rules; no conditions are widened.
 
 READ-ONLY audit: IngredientAllergenAudit.sql. We have NOT audited or mapped the production ingredient inventory.
 
@@ -47,6 +47,7 @@ Both IDs must exist. Evidence is required to verify a complete profile. This rep
 - Animal-milk yogurt -> Milk.
 - Chickpea tofu / coconut yogurt -> actual composition, NOT assumed Soy/Milk.
 Any admin rename/category/legacy allergy edit invalidates verification until a new review.
+Filtering reflects recorded relationships only; an unmapped allergen can still pass. This is not a guarantee of allergy safety. FE must not label an unmatched dish as verified allergen-free. Admins still need to complete origin mappings. The existing recipe response retains unverifiedIngredientNames; this BE-only change does not add warning UI or change list/planner response shapes.
 GET /api/ingredients adds allergenIds, isAllergenProfileVerified, allergenEvidence. RecipeResponse adds unverifiedIngredientNames so authors can see what needs catalog review; an empty list means each included ingredient has a reviewed profile, not a medical guarantee.
 
 ## Lists and ordering

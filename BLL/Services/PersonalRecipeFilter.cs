@@ -15,11 +15,12 @@ public sealed record PersonalRecipeFilter(int? DietTypeId, int[] AllergenIds)
             await db.UserAllergens.Where(x => x.UserId == userId).Select(x => x.AllergenId).ToArrayAsync(ct));
     }
 
+    // Exclude recorded allergen matches. Incomplete verification is metadata, not a blanket exclusion.
     public Expression<Func<Recipe, bool>> Predicate => recipe =>
         recipe.Post.Status == "PUBLISHED" && recipe.Ingredients.Any() &&
         !recipe.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup != "PLANT" && i.Ingredient.Category.DietaryGroup != "DAIRY" && i.Ingredient.Category.DietaryGroup != "EGG" && i.Ingredient.Category.DietaryGroup != "HONEY") &&
         (!DietTypeId.HasValue || recipe.DietCompatibilities.Any(d => d.DietTypeId == DietTypeId.Value && d.IsCompatible)) &&
-        (AllergenIds.Length == 0 || !recipe.Ingredients.Any(i => !i.Ingredient.IsAllergenProfileVerified ||
+        (AllergenIds.Length == 0 || !recipe.Ingredients.Any(i =>
             (i.Ingredient.AllergenId.HasValue && AllergenIds.Contains(i.Ingredient.AllergenId.Value)) ||
             i.Ingredient.AllergenLinks.Any(a => AllergenIds.Contains(a.AllergenId))));
 

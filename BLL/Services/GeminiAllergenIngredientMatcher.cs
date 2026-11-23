@@ -11,7 +11,7 @@ public sealed class GeminiAllergenIngredientMatcher : IAllergenIngredientMatcher
     {
         cancellationToken.ThrowIfCancellationRequested();
         var ids = allergens.Select(x => x.AllergenId).ToHashSet();
-        IReadOnlySet<int> blocked = ingredients.Where(i => ids.Count > 0 && (!i.IsAllergenProfileVerified ||
+        IReadOnlySet<int> blocked = ingredients.Where(i => ids.Count > 0 && (
             (i.AllergenId.HasValue && ids.Contains(i.AllergenId.Value)) || i.AllergenLinks.Any(a => ids.Contains(a.AllergenId))))
             .Select(i => i.IngredientId).ToHashSet();
         return Task.FromResult(blocked);
