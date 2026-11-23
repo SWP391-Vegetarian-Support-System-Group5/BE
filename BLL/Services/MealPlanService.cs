@@ -44,6 +44,7 @@ public class MealPlanService(
         await using var transaction = dbContext.Database.CurrentTransaction is null
             ? await dbContext.Database.BeginTransactionAsync(ct) : null;
         var replacement = await GeneratePlanCoreAsync(userId, request, isRegenerate: true, ct);
+        if (replacement.Meals.Count == 0) return replacement; // Preserve the old plan when no replacement can be created.
         var oldMeals = await mealPlanMeals.Query().Where(x => x.MealPlanId == id).ToListAsync(ct);
         foreach (var meal in oldMeals) mealPlanMeals.Remove(meal);
         mealPlans.Remove(oldPlan);

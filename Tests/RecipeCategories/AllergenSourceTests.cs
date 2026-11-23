@@ -132,6 +132,9 @@ static class AllergenSourceTests
         Check((await Search()).Count == 0 && (await posts.GetAsync(null,null,null,null,null,false,1)).Count == 0, "empty home/search results do not fall back");
         var emptyPlan = await planner.GenerateAsync(1, new(null, null, "MAINTAIN"));
         Check(emptyPlan.Meals.Count == 0 && emptyPlan.MealPlanId == 0 && await db.MealPlans.CountAsync() == 1, "empty planner result does not store a dummy plan");
+        var emptyRegeneration = await planner.RegenerateAsync(plan.MealPlanId, 1, new(null, null, "MAINTAIN"));
+        Check(emptyRegeneration.Meals.Count == 0 && await db.MealPlans.CountAsync() == 1 && await db.MealPlanMeals.CountAsync() == 21,
+            "empty regeneration preserves the existing plan and its meal rows");
         for (var id=10; id<110; id++) db.Allergens.Add(new Allergen { AllergenId=id, Name="Test allergen "+id }); await db.SaveChangesAsync();
         Check((await selection.UpdateAsync(2,new(Enumerable.Range(10,100).ToList()))).Allergens.Count == 100, "no arbitrary selection limit");
         Console.WriteLine($"SOURCE ALLERGEN TESTS: {checks} passed; isolated database only.");
