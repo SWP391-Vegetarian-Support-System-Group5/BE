@@ -28,8 +28,8 @@ public static class AllergenKeywordRules
         {
             var allergen = Normalize(label);
             if (allergen.Length == 0) continue;
-            // Explicit product choice: any mushroom selection excludes the whole mushroom keyword group.
-            if (ContainsPhrase(allergen, "nam") || ContainsPhrase(allergen, "mushroom") || allergen == "shiitake")
+            // Only a general mushroom selection expands to all varieties.
+            if (allergen is "nam" or "mushroom" or "mushrooms")
             {
                 if (new[] { "nam", "mushroom", "mushrooms", "shiitake" }.Any(k => ContainsPhrase(ingredient, k))) return true;
                 continue;
@@ -39,6 +39,7 @@ public static class AllergenKeywordRules
             if (verified) continue;
             string[] keywords = allergen switch
             {
+                "nam huong" or "nam dong co" or "shiitake" => ["nam huong", "nam dong co", "shiitake"],
                 "dau phong" or "lac" or "peanut" or "peanuts" => ["dau phong", "lac", "peanut", "peanuts"],
                 "dau nanh" or "dau tuong" or "soy" or "soya" => ["dau nanh", "dau tuong", "soy", "soya"],
                 "pho mai" or "pho mat" or "cheese" => ["pho mai", "pho mat", "cheese"],

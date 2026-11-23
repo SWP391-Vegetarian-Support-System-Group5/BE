@@ -80,7 +80,7 @@ public class MealPlanService(
             throw new ServiceException("The selected calorie deficit would make the daily target too low. Choose a smaller deficit or update your profile.", 400);
 
 
-        _ = allergenMatcher; // Legacy DI signature; eligibility uses shared deterministic rules.
+        _ = allergenMatcher; // Legacy DI signature; deterministic profile filtering decides recipe eligibility.
         var personalFilter = await PersonalRecipeFilter.LoadAsync(dbContext, userId, ct);
         var dietTypeId = user.Profile?.DietTypeId;
 
@@ -306,9 +306,10 @@ public class MealPlanService(
     private static bool IsPlanSuitable(MealPlan plan, User user)
     {
         if (user.Profile?.DietType is null) return false;
-        var filter = new PersonalRecipeFilter(user.Profile.DietTypeId, user.UserAllergens.Select(x => x.AllergenId).ToArray())
-        { AllergenNames = user.UserAllergens.Select(x => x.Allergen.Name).ToArray() };
-        return plan.Meals.Count == 21 && plan.Meals.All(meal => filter.Matches(meal.Recipe));
+        var filter = new PersonalRecipeFilter(user.Profile.DietTypeId, user.UserAllergens.Select(x => x.AllergenId).ToArray());
+        var allergens = user.UserAllergens.Select(a => a.Allergen).ToArray();
+        return plan.Meals.Count == 21 && plan.Meals.All(meal => filter.Matches(meal.Recipe) &&
+            !meal.Recipe.Ingredients.Any(i => IngredientAllergyMatch.Matches(i.Ingredient, allergens)));
     }
     public async Task<MealPlanResponse> GetByIdAsync(int id, int userId, string role, CancellationToken ct = default)
     {

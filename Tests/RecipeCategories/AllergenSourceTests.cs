@@ -123,8 +123,8 @@ static class AllergenSourceTests
             new Repository<Recipe>(db), new Ai(), new Knowledge(), matcher, new BillingService(db, new SePaySettings(), notifications));
         var session = await chat.CreateSessionAsync(2);
         var related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Sữa chua thực vật"));
-        Check(related.RelatedRecipes.Any(x => x.RecipeId == 8) && related.RelatedRecipes.All(x => x.RecipeId != 4),
-            "chat related suggestions use verified origin, allowing plant yogurt for milk allergy");
+        Check(related.RelatedRecipes.All(x => !new[] { 3, 4, 8 }.Contains(x.RecipeId)),
+            "chat respects the broad saved milk keyword, including plant milk names");
         await selection.UpdateAsync(2, new([1]));
         related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Đậu phụ kho"));
         Check(related.RelatedRecipes.All(x => !new[] {1,2,3,5,10}.Contains(x.RecipeId)),
@@ -153,8 +153,7 @@ static class AllergenSourceTests
                 "unverified catalog progressively filters home/search for [" + string.Join(",", ids) + "]");
             var blocked = await matcher.FindUnsafeAsync(await db.Allergens.Where(a => ids.Contains(a.AllergenId)).ToListAsync(), allIngredients);
             Check(blocked.SetEquals(allIngredients.Where(i => (i.AllergenId.HasValue && ids.Contains(i.AllergenId.Value)) ||
-                i.AllergenLinks.Any(a => ids.Contains(a.AllergenId)) ||
-                (ids.Contains(2) && new[] {3,4,8}.Contains(i.IngredientId))).Select(i => i.IngredientId)),
+                i.AllergenLinks.Any(a => ids.Contains(a.AllergenId)) || db.Allergens.AsEnumerable().Any(a => ids.Contains(a.AllergenId) && IngredientAllergyMatch.NameMatches(i.Name, a.Name))).Select(i => i.IngredientId)),
                 "matcher uses recorded relations even when all profiles are unverified");
         }
         await selection.UpdateAsync(1, new([1]));
@@ -170,6 +169,20 @@ static class AllergenSourceTests
         Check(await db.Ingredients.AllAsync(i => !i.IsAllergenProfileVerified && i.AllergenEvidence == null),
             "filtering never relabels unverified ingredients as verified");
 
+        db.Allergens.AddRange(new Allergen { AllergenId = 4, Name = "Nấm hương" }, new Allergen { AllergenId = 5, Name = "nấm" });
+        Recipe(112, "Bò kho chay", Ingredient(112, "NẤM HƯƠNG khô", 1, false));
+        Recipe(113, "Món nấm đùi gà", Ingredient(113, "nấm đùi gà", 1, false));
+        await db.SaveChangesAsync();
+        await selection.UpdateAsync(1, new([4]));
+        Check(!(await Search()).Any(r => r.PostId == 112) && (await Search()).Any(r => r.PostId == 113), "saved shiitake name excludes unmapped recipe");
+        await selection.UpdateAsync(1, new([5]));
+        Check(!(await posts.GetAsync(null,null,null,null,null,false,1)).Any(r => r.PostId == 112 || r.PostId == 113)
+            && (await Search()).Any(r => r.PostId == 6), "saved general mushroom keyword filters home and retains rice");
+        Check(!(await Search(keyword: "Bò kho chay")).Any(), "exact dish search cannot bypass keyword exclusion");
+        await selection.UpdateAsync(1, new([]));
+        Check((await Search()).Any(r => r.PostId == 112), "removing mushroom selection restores unmapped recipe immediately");
+        await selection.UpdateAsync(1, new([1]));
+
         foreach (var ingredient in await db.Ingredients.ToListAsync()) await catalog.ReviewAllergensAsync(ingredient.IngredientId, new([1], true, "Isolated test composition"), default);
         Check((await Search()).Count == 0 && (await posts.GetAsync(null,null,null,null,null,false,1)).Count == 0, "empty home/search results do not fall back");
         var emptyPlan = await planner.GenerateAsync(1, new(null, null, "MAINTAIN"));
@@ -180,7 +193,7 @@ static class AllergenSourceTests
         for (var id=10; id<110; id++) db.Allergens.Add(new Allergen { AllergenId=id, Name="Test allergen "+id }); await db.SaveChangesAsync();
         Check((await selection.UpdateAsync(2,new(Enumerable.Range(10,100).ToList()))).Allergens.Count == 100, "no arbitrary selection limit");
 
-        db.Allergens.AddRange(new Allergen { AllergenId = 200, Name = "Nấm hương" }, new Allergen { AllergenId = 201, Name = "Đậu phộng" });
+        db.Allergens.AddRange(new Allergen { AllergenId = 200, Name = "Nấm" }, new Allergen { AllergenId = 201, Name = "Đậu phộng" });
         var mushroom = Ingredient(200, "NẤM HƯƠNG tươi", 1, false);
         var kingOyster = Ingredient(201, "nam-dui-ga", 1, true);
         var mushroomSeasoning = Ingredient(202, "Hạt nêm nấm", 1, false);
@@ -222,7 +235,7 @@ static class AllergenSourceTests
             .UseMySql("Server=localhost;Database=not_used;User=test;Password=test", new MySqlServerVersion(new Version(8,0,0))).Options))
         {
             var sql = mushroomFilter.Apply(mysql.Recipes).Take(1).ToQueryString();
-            Check(sql.Contains("IngredientId") && sql.Contains("LIMIT") && mushroomFilter.KeywordIngredientIds.Contains(200),
+            Check(sql.Contains("IngredientId") && sql.Contains("LIMIT") && mushroomFilter.NameMatchedIngredientIds.Contains(200),
                 "keyword ingredient IDs translate into MySQL filtering before limit");
         }
         var keywordPlan = await planner.GenerateAsync(1, new(null,null,"MAINTAIN"));
@@ -248,7 +261,7 @@ static class AllergenSourceTests
         Check(keywordBlocked.Contains(200) && keywordBlocked.Contains(201) && keywordBlocked.Contains(202) && !keywordBlocked.Contains(203),
             "compatibility matcher agrees with query keyword matching");
         Check(AllergenKeywordRules.Matches(["Nấm"], "Nấm hương", false) &&
-            AllergenKeywordRules.Matches(["Nấm hương"], "  NẤM, đùi gà ", false) &&
+            AllergenKeywordRules.Matches(["Nấm"], "  NẤM, đùi gà ", false) &&
             !AllergenKeywordRules.Matches(["Nấm hương"], "Namur", false) &&
             !AllergenKeywordRules.Matches(["Đậu phộng"], "Đậu gà", false),
             "normalization handles decomposed accents and word boundaries without arbitrary token widening");

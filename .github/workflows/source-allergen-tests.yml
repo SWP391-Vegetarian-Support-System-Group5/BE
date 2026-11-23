@@ -24,6 +24,8 @@ jobs:
         run: dotnet build Tests/RecipeCategories/RecipeCategories.csproj -p:NuGetAudit=false
       - name: Source relations and personalized query tests
         run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --source-allergens
+      - name: Ingredient keyword allergy tests
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --keyword-allergens
       - name: JWT selection API tests
         run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --source-allergens-api
       - name: Existing business regressions

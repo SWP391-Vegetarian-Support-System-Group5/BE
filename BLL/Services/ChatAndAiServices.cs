@@ -103,10 +103,9 @@ public class NutritionChatbotService(
 
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(User? user, string message, CancellationToken ct)
     {
-        var allergens = user?.UserAllergens.Select(x => x.AllergenId).ToArray() ?? [];
         var dietTypeId = user?.Profile?.DietTypeId;
         _ = allergenMatcher; // Keep DI compatibility; source eligibility uses the reviewed catalog.
-        var filter = new PersonalRecipeFilter(dietTypeId, allergens);
+        var filter = await PersonalRecipeFilter.CreateAsync(recipes.Query().SelectMany(r => r.Ingredients).Select(i => i.Ingredient), dietTypeId, user?.UserAllergens.Select(a => a.Allergen).ToArray() ?? [], ct);
         var query = filter.Apply(recipes.Query().AsNoTracking());
         var terms = message.Split([' ', ',', '.', '?', '!', ':', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(x => x.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();

@@ -8,6 +8,11 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--keyword-allergens"))
+{
+    await AllergenKeywordTests.RunAsync();
+    return;
+}
 if (args.Contains("--source-allergens"))
 {
     await AllergenSourceTests.RunAsync();
