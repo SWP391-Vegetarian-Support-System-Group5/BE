@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool locationOnly = false, bool avatarOnly = false)
+    public static async Task RunAsync(bool locationOnly = false, bool avatarOnly = false, bool sourceAllergensOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -108,6 +108,31 @@ static class AdminApiTests
             var userLogin = await Send("POST", "/api/auth/login", 200, new { email = "user2@example.invalid", password = "Test@123" });
             var admin = adminLogin.GetProperty("token").GetString()!;
             var user = userLogin.GetProperty("token").GetString()!;
+            if (sourceAllergensOnly)
+            {
+                await Send("PUT", "/api/users/me/allergens", 401, new { allergenIds = Array.Empty<int>() });
+                await Send("POST", "/api/admin/allergens", 403, new { name = "Forbidden new allergen" }, user);
+                var added = await Send("POST", "/api/admin/allergens", 201, new { name = "Đậu nành" }, admin);
+                var allergenId = added.GetProperty("id").GetInt32();
+                await Send("GET", "/api/allergens", 200);
+                var saved = await Send("PUT", "/api/users/me/allergens", 200, new { userId = 3, allergenIds = new[] { allergenId, allergenId } }, user);
+                if (saved.GetProperty("userId").GetInt32() != 2 || saved.GetProperty("allergens").GetArrayLength() != 1)
+                    throw new Exception("Selection must use JWT account and deduplicate IDs.");
+                var thirdLogin = await Send("POST", "/api/auth/login", 200, new { email = "user3@example.invalid", password = "Test@123" });
+                var thirdToken = thirdLogin.GetProperty("token").GetString()!;
+                var other = await Send("GET", "/api/users/me/allergens", 200, token: thirdToken);
+                if (other.GetProperty("allergens").GetArrayLength() != 0) throw new Exception("Other account was modified.");
+                await Send("PUT", "/api/users/me/allergens", 404, new { allergenIds = new[] { int.MaxValue } }, user);
+                await Send("PUT", "/api/users/me/allergens", 400, new { allergenIds = new[] { -1 } }, user);
+                var unchanged = await Send("GET", "/api/users/me/allergens", 200, token: user);
+                if (unchanged.GetProperty("allergens").GetArrayLength() != 1) throw new Exception("Invalid IDs changed saved selection.");
+                var cleared = await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = Array.Empty<int>() }, user);
+                if (cleared.GetProperty("allergens").GetArrayLength() != 0) throw new Exception("Empty selection was not saved.");
+                await Send("PUT", "/api/admin/ingredients/1/allergens", 403, new { allergenIds = new[] { allergenId }, isVerified = true, evidence = "Test" }, user);
+                Console.WriteLine("PASS source allergy JWT/catalog HTTP contract; isolated test storage only.");
+                return;
+            }
+
             if (avatarOnly)
             {
                 await AvatarApiTests.RunAsync(client, user, admin);

@@ -26,6 +26,8 @@ public class AdministrationController(IUserAdministrationService userAdministrat
     [HttpGet("comments")] public Task<IReadOnlyCollection<CommentResponse>> GetComments(CancellationToken ct) => postService.GetAllCommentsAsync(ct);
     [HttpDelete("comments/{id:int}")] public async Task<IActionResult> DeleteComment(int id, CancellationToken ct) { await postService.DeleteCommentAsync(id, User.GetRequiredUserId(), "ADMIN", ct); return NoContent(); }
     [HttpPut("comments/{id:int}/visibility")] public async Task<IActionResult> SetCommentVisibility(int id, UpdateCommentVisibilityRequest request, CancellationToken ct) { await postService.SetCommentVisibilityAsync(id, request.Hidden, ct); return NoContent(); }
+    [HttpPut("ingredients/{id:int}/allergens")]
+    public Task<IngredientResponse> ReviewIngredientAllergens(int id, ReviewIngredientAllergensRequest request, CancellationToken ct) => ingredientCatalog.ReviewAllergensAsync(id, request, ct);
     [HttpPut("ingredients/{id:int}")] public Task<IngredientResponse> UpdateIngredient(int id, UpdateIngredientRequest request, CancellationToken ct) => ingredientCatalog.UpdateAsync(id, request, ct);
     [HttpPost("ingredient-categories")] public async Task<ActionResult<IngredientCategoryResponse>> CreateIngredientCategory(IngredientCategoryRequest request, CancellationToken ct) => Created("/api/ingredient-categories", await ingredientCatalog.CreateCategoryAsync(request, ct));
     [HttpPut("ingredient-categories/{id:int}")] public Task<IngredientCategoryResponse> UpdateIngredientCategory(int id, IngredientCategoryRequest request, CancellationToken ct) => ingredientCatalog.UpdateCategoryAsync(id, request, ct);

@@ -58,7 +58,7 @@ public class ReferenceDataAndRestaurantService(
     public async Task DeleteAllergenAsync(int id, CancellationToken cancellationToken = default)
     {
         await RequireAsync(allergens, id, cancellationToken);
-        if (await userAllergens.Query().AnyAsync(x => x.AllergenId == id, cancellationToken) || await ingredients.Query().AnyAsync(x => x.AllergenId == id, cancellationToken)) throw new ServiceException("Allergen is in use and cannot be deleted.", 409);
+        if (await userAllergens.Query().AnyAsync(x => x.AllergenId == id, cancellationToken) || await ingredients.Query().AnyAsync(x => x.AllergenId == id || x.AllergenLinks.Any(a => a.AllergenId == id), cancellationToken)) throw new ServiceException("Allergen is in use and cannot be deleted.", 409);
         await DeleteAsync(allergens, id, cancellationToken);
     }
 

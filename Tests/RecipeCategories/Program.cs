@@ -8,6 +8,12 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--source-allergens"))
+{
+    await AllergenSourceTests.RunAsync();
+    return;
+}
+
 if (args.Contains("--apply-avatar-schema") || args.Contains("--verify-avatar-schema") || args.Contains("--verify-avatar-cloudinary"))
 {
     try { await AvatarVerification.RunAsync(args.Contains("--apply-avatar-schema"), args.Contains("--verify-avatar-cloudinary")); }
@@ -36,11 +42,11 @@ if (args.Contains("--birth-year"))
     return;
 }
 
-if (args.Contains("--admin-api") || args.Contains("--location-api") || args.Contains("--avatar-api"))
+if (args.Contains("--admin-api") || args.Contains("--location-api") || args.Contains("--avatar-api") || args.Contains("--source-allergens-api"))
 {
     try
     {
-        await AdminApiTests.RunAsync(locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"));
+        await AdminApiTests.RunAsync(locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"), sourceAllergensOnly: args.Contains("--source-allergens-api"));
     }
     catch (Exception error)
     {

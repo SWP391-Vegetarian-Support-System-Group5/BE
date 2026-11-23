@@ -133,11 +133,9 @@ public class NutritionChatbotService(
     {
         var allergens = user?.UserAllergens.Select(x => x.AllergenId).ToArray() ?? [];
         var dietTypeId = user?.Profile?.DietTypeId;
-        var query = recipes.Query().AsNoTracking().Where(x => x.Post.Status == "PUBLISHED"
-            && x.Ingredients.Any()
-            && !x.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup != "PLANT" && i.Ingredient.Category.DietaryGroup != "DAIRY" && i.Ingredient.Category.DietaryGroup != "EGG" && i.Ingredient.Category.DietaryGroup != "HONEY")
-            && !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergens.Contains(i.Ingredient.AllergenId.Value))
-            && (!dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible)));
+        _ = allergenMatcher; // Keep DI compatibility; source eligibility uses the reviewed catalog.
+        var filter = new PersonalRecipeFilter(dietTypeId, allergens);
+        var query = filter.Apply(recipes.Query().AsNoTracking());
         var terms = message.Split([' ', ',', '.', '?', '!', ':', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(x => x.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();
         if (terms.Length == 0) return [];
@@ -151,21 +149,8 @@ public class NutritionChatbotService(
         }
         var ranking = Expression.Lambda<Func<Recipe, int>>(score, parameter);
         var matched = Expression.Lambda<Func<Recipe, bool>>(Expression.GreaterThan(score, Expression.Constant(0)), parameter);
-        // Check names and aliases after SQL ranking: user-defined allergies may not
-        // have an Ingredient.AllergenId assigned in the shared catalog yet.
-        var candidates = await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId).Take(30)
-            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
-            .AsSplitQuery().ToListAsync(ct);
-        var unsafeIds = await allergenMatcher.FindUnsafeAsync(user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [],
-            candidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
-        return candidates
-            .Where(recipe => !recipe.Ingredients.Any(item =>
-                unsafeIds.Contains(item.IngredientId) ||
-                user?.UserAllergens.Any(allergy =>
-                    !(item.Ingredient.Category.DietaryGroup == VegetarianDietRules.Plant &&
-                      allergy.Allergen.Name.Equals("Milk", StringComparison.OrdinalIgnoreCase)) &&
-                    AllergenLexicon.Terms(allergy.Allergen).Any(term => AllergenLexicon.ContainsTerm(item.Ingredient.Name, term))) == true))
-            .Take(5).Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToList();
+        return await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId)
+            .Take(5).Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToListAsync(ct);
     }
 
     private sealed class RecipeParameterVisitor(ParameterExpression source, ParameterExpression target) : ExpressionVisitor
