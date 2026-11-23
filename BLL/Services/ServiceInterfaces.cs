@@ -77,7 +77,7 @@ public interface IReferenceDataAndRestaurantService
 public interface IPostService
 {
     Task<PostResponse> CreateAsync(int userId, CreatePostRequest request, CancellationToken cancellationToken = default);
-    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default, string? sort = null);
     Task<IReadOnlyCollection<PostResponse>> GetMineAsync(int userId, CancellationToken cancellationToken = default);
     Task<PostResponse> GetByIdAsync(int id, int? actorId, string? role, CancellationToken cancellationToken = default);
     Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default);

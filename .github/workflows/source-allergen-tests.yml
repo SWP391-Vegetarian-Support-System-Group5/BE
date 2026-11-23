@@ -1,0 +1,36 @@
+name: Verified ingredient allergy tests
+on:
+  push:
+    branches: [Tri, codex/allergen-source-filter-20261123, codex/filter-recorded-allergens-20261123]
+  pull_request:
+    paths:
+      - 'API/**'
+      - 'BLL/**'
+      - 'DAL/**'
+      - 'Tests/**'
+      - '.github/workflows/source-allergen-tests.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build isolated test runner
+        run: dotnet build Tests/RecipeCategories/RecipeCategories.csproj -p:NuGetAudit=false
+      - name: Source relations and personalized query tests
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --source-allergens
+      - name: Ingredient keyword allergy tests
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --keyword-allergens
+      - name: JWT selection API tests
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --source-allergens-api
+      - name: Existing business regressions
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build
+      - name: Video analysis regressions
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --video-analysis
+      - name: Profile regressions
+        run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --birth-year

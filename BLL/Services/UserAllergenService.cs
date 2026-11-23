@@ -32,13 +32,15 @@ public class UserAllergenService(
         if (!await users.Query().AnyAsync(x => x.UserId == userId, cancellationToken))
             throw new ServiceException("User was not found.", 404);
 
+        if (request.AllergenIds is null) throw new ServiceException("allergenIds is required; send [] to clear selections.", 400);
         var ids = request.AllergenIds.Distinct().ToHashSet();
+        if (ids.Any(id => id <= 0)) throw new ServiceException("Allergen IDs must be positive catalog IDs.", 400);
         if (ids.Count != await allergens.Query().CountAsync(x => ids.Contains(x.AllergenId), cancellationToken))
             throw new ServiceException("One or more allergens were not found.", 404);
 
-        foreach (var item in await userAllergens.Query().Where(x => x.UserId == userId).ToListAsync(cancellationToken))
-            userAllergens.Remove(item);
-        foreach (var id in ids)
+        var current = await userAllergens.Query().Where(x => x.UserId == userId).ToListAsync(cancellationToken);
+        foreach (var item in current.Where(x => !ids.Contains(x.AllergenId))) userAllergens.Remove(item);
+        foreach (var id in ids.Except(current.Select(x => x.AllergenId)))
             await userAllergens.AddAsync(new UserAllergen { UserId = userId, AllergenId = id }, cancellationToken);
 
         await userAllergens.SaveChangesAsync(cancellationToken);

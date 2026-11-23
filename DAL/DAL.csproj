@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -21,6 +21,7 @@
     <Compile Remove="Data\Migrations\**\*.cs" />
     <!-- Only reviewed, forward MySQL migrations are explicitly included. -->
     <Compile Include="Data\Migrations\202611210016_AddSubscriptionBillingAndAiUsage.cs" />
+    <Compile Include="Data\Migrations\202611230001_AddVerifiedIngredientAllergens.cs" />
   </ItemGroup>
 
 </Project>
