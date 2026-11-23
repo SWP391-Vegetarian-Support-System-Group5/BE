@@ -113,9 +113,9 @@ static class AdminApiTests
                 await Send("PUT", "/api/users/me/allergens", 401, new { allergenIds = Array.Empty<int>() });
                 await Send("POST", "/api/admin/allergens", 403, new { name = "Forbidden new allergen" }, user);
                 var added = await Send("POST", "/api/admin/allergens", 201, new { name = "Đậu nành" }, admin);
-                var allergenId = added.GetProperty("id").GetInt32();
+                var selectedCatalogId = added.GetProperty("id").GetInt32();
                 await Send("GET", "/api/allergens", 200);
-                var saved = await Send("PUT", "/api/users/me/allergens", 200, new { userId = 3, allergenIds = new[] { allergenId, allergenId } }, user);
+                var saved = await Send("PUT", "/api/users/me/allergens", 200, new { userId = 3, allergenIds = new[] { selectedCatalogId, selectedCatalogId } }, user);
                 if (saved.GetProperty("userId").GetInt32() != 2 || saved.GetProperty("allergens").GetArrayLength() != 1)
                     throw new Exception("Selection must use JWT account and deduplicate IDs.");
                 var thirdLogin = await Send("POST", "/api/auth/login", 200, new { email = "user3@example.invalid", password = "Test@123" });
@@ -128,7 +128,7 @@ static class AdminApiTests
                 if (unchanged.GetProperty("allergens").GetArrayLength() != 1) throw new Exception("Invalid IDs changed saved selection.");
                 var cleared = await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = Array.Empty<int>() }, user);
                 if (cleared.GetProperty("allergens").GetArrayLength() != 0) throw new Exception("Empty selection was not saved.");
-                await Send("PUT", "/api/admin/ingredients/1/allergens", 403, new { allergenIds = new[] { allergenId }, isVerified = true, evidence = "Test" }, user);
+                await Send("PUT", "/api/admin/ingredients/1/allergens", 403, new { allergenIds = new[] { selectedCatalogId }, isVerified = true, evidence = "Test" }, user);
                 Console.WriteLine("PASS source allergy JWT/catalog HTTP contract; isolated test storage only.");
                 return;
             }
