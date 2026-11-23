@@ -74,16 +74,6 @@ public class NutritionChatbotService(
 
         var user = userId.HasValue ? await users.Query().AsNoTracking().Include(x => x.Profile).ThenInclude(x => x!.DietType)
             .Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) : null;
-        var userAllergens = user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [];
-        if (TryBuildAllergenConflictReply(request.Content, userAllergens, out var blockedReply))
-        {
-            var blockedResponse = new ChatMessage { ChatSessionId = id, Sender = "AI", Content = blockedReply, CreatedAt = VietnamTime.Now };
-            await messages.AddAsync(blockedResponse, cancellationToken);
-            await messages.SaveChangesAsync(cancellationToken);
-            int? remaining = session.UserId.HasValue ? null : GuestMessageLimit - guestMessageCount - 1;
-            return new(blockedResponse.ChatMessageId, blockedReply, [], [], remaining, false);
-        }
-
         var history = await messages.Query().AsNoTracking().Where(x => x.ChatSessionId == id && x.ChatMessageId != userMessage.ChatMessageId)
             .OrderByDescending(x => x.ChatMessageId).Take(8).ToListAsync(cancellationToken);
         var relatedRecipes = await GetRelatedRecipesAsync(user, request.Content, cancellationToken);
@@ -103,21 +93,6 @@ public class NutritionChatbotService(
         return new(response.ChatMessageId, chatbotReply.Answer, relatedRecipes, knowledge.Sources, remainingMessages, false);
     }
 
-    private static bool TryBuildAllergenConflictReply(string message, IReadOnlyCollection<Allergen> userAllergens, out string reply)
-    {
-        foreach (var allergen in userAllergens)
-        {
-            var matchedAlias = GetAllergenAliases(allergen).FirstOrDefault(alias => AllergenLexicon.ContainsTerm(message, alias));
-            if (matchedAlias is null) continue;
-
-            reply = BuildAllergenConflictReply(allergen.Name);
-            return true;
-        }
-
-        reply = string.Empty;
-        return false;
-    }
-
     private static IEnumerable<string> GetAllergenAliases(Allergen allergen)
     {
         foreach (var term in AllergenLexicon.Terms(allergen)) yield return term;
@@ -125,9 +100,6 @@ public class NutritionChatbotService(
             foreach (var alias in aliases)
                 yield return alias;
     }
-
-    private static string BuildAllergenConflictReply(string allergen) =>
-        $"Món này không phù hợp với hồ sơ dị ứng của bạn vì có liên quan đến {allergen}. Mình không thể hướng dẫn công thức chứa nguyên liệu đó.\n\nBạn có thể đổi sang món an toàn hơn như sữa yến mạch, sữa gạo, sữa dừa hoặc một món chay không dùng nhóm nguyên liệu gây dị ứng này. Nếu dị ứng nặng, nhớ kiểm tra nhãn nguyên liệu và hỏi chuyên gia y tế khi cần nhé.";
 
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(User? user, string message, CancellationToken ct)
     {

@@ -117,6 +117,17 @@ static class AllergenSourceTests
         var replacements = await planner.GetReplacementOptionsAsync(plan.MealPlanId, meal.MealPlanMealId, 1, null);
         Check(replacements.All(x => !new[] { 1,2,3,5,10,created.PostId }.Contains(x.RecipeId)), "replacement options obey saved profile");
         await Reject(() => planner.ReplaceMealAsync(plan.MealPlanId, meal.MealPlanMealId, 1, 2), "explicit excluded recipe selection rejected");
+        await selection.UpdateAsync(2, new([2]));
+        var chat = new NutritionChatbotService(new Repository<ChatSession>(db), new Repository<ChatMessage>(db), new Repository<User>(db),
+            new Repository<Recipe>(db), new Ai(), new Knowledge(), matcher, new BillingService(db, new SePaySettings(), notifications));
+        var session = await chat.CreateSessionAsync(2);
+        var related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Sữa chua thực vật"));
+        Check(related.RelatedRecipes.Any(x => x.RecipeId == 8) && related.RelatedRecipes.All(x => x.RecipeId != 4),
+            "chat related suggestions use verified origin, allowing plant yogurt for milk allergy");
+        await selection.UpdateAsync(2, new([1]));
+        related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Đậu phụ kho"));
+        Check(related.RelatedRecipes.All(x => !new[] {1,2,3,5,10,created.PostId}.Contains(x.RecipeId)),
+            "chat exact excluded dish name cannot bypass saved allergy profile");
         foreach (var ingredient in await db.Ingredients.ToListAsync()) await catalog.ReviewAllergensAsync(ingredient.IngredientId, new([1], true, "Isolated test composition"), default);
         Check((await Search()).Count == 0 && (await posts.GetAsync(null,null,null,null,null,false,1)).Count == 0, "empty home/search results do not fall back");
         var emptyPlan = await planner.GenerateAsync(1, new(null, null, "MAINTAIN"));
@@ -125,6 +136,8 @@ static class AllergenSourceTests
         Check((await selection.UpdateAsync(2,new(Enumerable.Range(10,100).ToList()))).Allergens.Count == 100, "no arbitrary selection limit");
         Console.WriteLine($"SOURCE ALLERGEN TESTS: {checks} passed; isolated database only.");
     }
+    sealed class Ai : IAiChatService { public Task<ChatbotReply> ReplyAsync(ChatbotRequest request, CancellationToken ct=default) => Task.FromResult(new ChatbotReply("Use the verified suggestions.", [])); }
+    sealed class Knowledge : IKnowledgeBaseService { public KnowledgeBaseMatch FindRelevant(string question) => new("", []); }
     sealed class Events : ICommunityEventPublisher { public Task PublishAsync(CommunityEvent e, CancellationToken ct=default) => Task.CompletedTask; }
     sealed class NotificationSink : INotificationEventPublisher { public Task SendAsync(int id, UserNotificationResponse n, CancellationToken ct=default) => Task.CompletedTask; }
 }
