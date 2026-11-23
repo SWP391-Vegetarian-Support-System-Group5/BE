@@ -114,7 +114,7 @@ static class AdminApiTests
                 await Send("POST", "/api/admin/allergens", 403, new { name = "Forbidden new allergen" }, user);
                 var added = await Send("POST", "/api/admin/allergens", 201, new { name = "Đậu nành" }, admin);
                 var selectedCatalogId = added.GetProperty("id").GetInt32();
-                await Send("GET", "/api/allergens", 200);
+                await Send("GET", "/api/allergens", 200, token: user);
                 var saved = await Send("PUT", "/api/users/me/allergens", 200, new { userId = 3, allergenIds = new[] { selectedCatalogId, selectedCatalogId } }, user);
                 if (saved.GetProperty("userId").GetInt32() != 2 || saved.GetProperty("allergens").GetArrayLength() != 1)
                     throw new Exception("Selection must use JWT account and deduplicate IDs.");
