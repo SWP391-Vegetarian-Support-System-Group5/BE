@@ -28,6 +28,8 @@ GET /api/users/me/allergens returns this same shape. PUT with `{"allergenIds":[]
 
 ## Mapping verification and migration (NOT executed automatically)
 Migration: `202611230001_AddVerifiedIngredientAllergens`, explicitly included in DAL.csproj.
+
+If runtime logs report missing AllergenEvidence/IngredientAllergens, follow [the local/test repair procedure](README_RepairAllergenSchema.md). Git merges do not update database schema. The targeted ApplyVerifiedIngredientAllergens.sql is manual and is never run by API startup.
 - Adds IsAllergenProfileVerified=false, AllergenEvidence (nullable).
 - Creates IngredientAllergens with composite key, FK restrictions and allergen lookup index.
 - Copies every non-null legacy Ingredient.AllergenId into the link table; retains the original column.

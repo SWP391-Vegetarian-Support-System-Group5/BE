@@ -1,13 +1,14 @@
 name: Verified ingredient allergy tests
 on:
   push:
-    branches: [codex/allergen-source-filter-20261123]
+    branches: [codex/allergen-source-filter-20261123, codex/fix-allergen-schema-20261123]
   pull_request:
     paths:
       - 'API/**'
       - 'BLL/**'
       - 'DAL/**'
       - 'Tests/**'
+      - 'Database/**'
       - '.github/workflows/source-allergen-tests.yml'
 permissions:
   contents: read
@@ -32,3 +33,80 @@ jobs:
         run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --video-analysis
       - name: Profile regressions
         run: dotnet run --project Tests/RecipeCategories/RecipeCategories.csproj --no-build -- --birth-year
+
+  mysql-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: isolated-ci-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pisolated-ci-password"
+          --health-interval=10s --health-timeout=5s --health-retries=15
+    env:
+      MYSQL_PWD: isolated-ci-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check targeted repair on isolated MySQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mysql_ci() { mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u root --batch --skip-column-names "$@"; }
+          expect() {
+            local actual
+            actual="$(mysql_ci vm_allergen_schema_test -e "$1")"
+            if [ "$actual" != "$2" ]; then
+              echo "Assertion failed: $1; expected $2; got $actual"
+              exit 1
+            fi
+          }
+          mysql_ci <<'SQL'
+          CREATE DATABASE vm_allergen_schema_test;
+          USE vm_allergen_schema_test;
+          CREATE TABLE Allergens (AllergenId int NOT NULL PRIMARY KEY);
+          CREATE TABLE Ingredients (
+            IngredientId int NOT NULL PRIMARY KEY, Name varchar(200) NOT NULL,
+            AllergenId int NULL,
+            FOREIGN KEY (AllergenId) REFERENCES Allergens(AllergenId)
+          );
+          INSERT INTO Allergens VALUES (1),(2);
+          INSERT INTO Ingredients VALUES (1,'Soy tofu',1),(2,'Rice',NULL);
+          SQL
+          mysql_ci vm_allergen_schema_test < Database/ApplyVerifiedIngredientAllergens.sql
+          expect "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='Ingredients' AND column_name IN ('AllergenEvidence','IsAllergenProfileVerified')" "2"
+          expect "SELECT COUNT(*) FROM IngredientAllergens WHERE IngredientId=1 AND AllergenId=1" "1"
+          expect "SELECT SUM(IsAllergenProfileVerified) FROM Ingredients" "0"
+          expect "SELECT COUNT(*) FROM IngredientAllergens WHERE IngredientId=2" "0"
+          expect "SELECT COUNT(*) FROM __EFMigrationsHistory" "1"
+          mysql_ci vm_allergen_schema_test <<'SQL'
+          INSERT INTO IngredientAllergens VALUES (1,2);
+          UPDATE Ingredients SET IsAllergenProfileVerified=1, AllergenEvidence='Reviewed product label' WHERE IngredientId=1;
+          SQL
+          mysql_ci vm_allergen_schema_test < Database/ApplyVerifiedIngredientAllergens.sql
+          expect "SELECT COUNT(*) FROM IngredientAllergens WHERE IngredientId=1" "2"
+          expect "SELECT IsAllergenProfileVerified FROM Ingredients WHERE IngredientId=1" "1"
+          expect "SELECT AllergenEvidence FROM Ingredients WHERE IngredientId=1" "Reviewed product label"
+          expect "SELECT COUNT(*) FROM Ingredients" "2"
+          expect "SELECT Name FROM Ingredients WHERE IngredientId=1" "Soy tofu"
+          expect "SELECT AllergenId FROM Ingredients WHERE IngredientId=1" "1"
+          expect "SELECT COUNT(*) FROM __EFMigrationsHistory" "1"
+          # Simulate interruption after the first ALTER on a second test database.
+          mysql_ci <<'SQL'
+          CREATE DATABASE vm_allergen_partial_test;
+          USE vm_allergen_partial_test;
+          CREATE TABLE Allergens (AllergenId int NOT NULL PRIMARY KEY);
+          CREATE TABLE Ingredients (
+            IngredientId int NOT NULL PRIMARY KEY, Name varchar(200) NOT NULL,
+            AllergenId int NULL, IsAllergenProfileVerified tinyint(1) NOT NULL DEFAULT 0,
+            FOREIGN KEY (AllergenId) REFERENCES Allergens(AllergenId)
+          );
+          INSERT INTO Allergens VALUES (1);
+          INSERT INTO Ingredients VALUES (1,'Soy milk',1,0);
+          SQL
+          mysql_ci vm_allergen_partial_test < Database/ApplyVerifiedIngredientAllergens.sql
+          test "$(mysql_ci vm_allergen_partial_test -e 'SELECT COUNT(*) FROM IngredientAllergens')" = "1"
+          test "$(mysql_ci vm_allergen_partial_test -e 'SELECT COUNT(*) FROM Ingredients WHERE IsAllergenProfileVerified=0 AND AllergenEvidence IS NULL')" = "1"
+          echo "PASS: initial schema, source backfill, unverified defaults, rerun, multi-links/evidence/data/history preservation, partial repair."
