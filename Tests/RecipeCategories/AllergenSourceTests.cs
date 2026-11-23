@@ -163,6 +163,7 @@ static class AllergenSourceTests
         var unverifiedPlan = await planner.RegenerateAsync(plan.MealPlanId, 1, new(null, null, "MAINTAIN"));
         Check(unverifiedPlan.Meals.Count == 21 && unverifiedPlan.Meals.All(x => !new[] {1,2,3,5,10}.Contains(x.RecipeId)),
             "planner still generates a complete plan with an unverified catalog using recorded allergies");
+        plan = unverifiedPlan; // Regeneration replaces the persisted plan and returns its new ID.
         await Reject(() => planner.ReplaceMealAsync(plan.MealPlanId, unverifiedPlan.Meals.First().MealPlanMealId, 1, 2),
             "unverified matching tofu cannot bypass explicit replacement");
         Check(await db.Ingredients.AllAsync(i => !i.IsAllergenProfileVerified && i.AllergenEvidence == null),
