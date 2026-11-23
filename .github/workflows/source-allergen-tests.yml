@@ -1,7 +1,7 @@
 name: Verified ingredient allergy tests
 on:
   push:
-    branches: [codex/allergen-source-filter-20261123, codex/filter-recorded-allergens-20261123]
+    branches: [Tri, codex/allergen-source-filter-20261123, codex/filter-recorded-allergens-20261123]
   pull_request:
     paths:
       - 'API/**'

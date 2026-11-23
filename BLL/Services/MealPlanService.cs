@@ -80,8 +80,8 @@ public class MealPlanService(
             throw new ServiceException("The selected calorie deficit would make the daily target too low. Choose a smaller deficit or update your profile.", 400);
 
 
-        _ = allergenMatcher; // Legacy DI signature; no AI/name inference decides recipe eligibility.
-        var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+        _ = allergenMatcher; // Legacy DI signature; eligibility uses shared deterministic rules.
+        var personalFilter = await PersonalRecipeFilter.LoadAsync(dbContext, userId, ct);
         var dietTypeId = user.Profile?.DietTypeId;
 
         var allValidCandidates = await recipes.Query()
@@ -89,7 +89,7 @@ public class MealPlanService(
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.AllergenLinks)
             .Include(x => x.DietCompatibilities)
-            .Where(new PersonalRecipeFilter(dietTypeId, userAllergenIds.ToArray()).Predicate)
+            .Where(personalFilter.Predicate)
             .Where(x => !dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible))
             .ToListAsync(ct);
 
@@ -97,7 +97,7 @@ public class MealPlanService(
         var filteredCandidates = allValidCandidates
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
             .Where(x => !dietTypeId.HasValue || VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile?.DietType?.Name ?? ""))
-            .Where(x => new PersonalRecipeFilter(dietTypeId, userAllergenIds.ToArray()).Matches(x))
+            .Where(x => personalFilter.Matches(x))
             .ToList();
 
         if (filteredCandidates.Count == 0) return new(0, (request.StartDate ?? DateTime.UtcNow.Date).Date, bmi, bmiCategory, [], tdee, targetCalories, nutritionGoal, adjustment);
@@ -243,7 +243,7 @@ public class MealPlanService(
         if (user.Profile?.DietType is null) throw new ServiceException("Choose your vegetarian type in your profile before creating a meal plan.", 400);
         if (!IsPlanSuitable(plan, user)) throw new ServiceException("This meal plan no longer matches your profile. Generate a new plan before replacing meals.", 409);
 
-        var userAllergenIds = user.UserAllergens.Select(x => x.AllergenId).ToHashSet();
+        var personalFilter = await PersonalRecipeFilter.LoadAsync(dbContext, userId, ct);
         var preferences = IngredientPreferences.Parse(plan.AvailableIngredients);
         var currentRecipeIdsInPlan = plan.Meals.Select(x => x.RecipeId).ToHashSet();
         var replacementCandidates = await recipes.Query()
@@ -251,7 +251,7 @@ public class MealPlanService(
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.AllergenLinks)
             .Include(x => x.DietCompatibilities)
-            .Where(new PersonalRecipeFilter(user.Profile.DietTypeId, userAllergenIds.ToArray()).Predicate)
+            .Where(personalFilter.Predicate)
             .Where(x => x.PostId != mealToReplace.RecipeId)
             .Where(x => x.CaloriesPerServing.HasValue && x.CaloriesPerServing > 0)
             .Where(x => x.DietCompatibilities.Any(d => d.DietTypeId == user.Profile.DietTypeId && d.IsCompatible))
@@ -259,7 +259,7 @@ public class MealPlanService(
         var scored = replacementCandidates
             .Where(x => VegetarianDietRules.IsVerifiedVegetarianRecipe(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)))
             .Where(x => VegetarianDietRules.GetCompatibleDietTypes(x.Ingredients.Select(i => i.Ingredient.Category.DietaryGroup)).Contains(user.Profile.DietType!.Name))
-            .Where(x => new PersonalRecipeFilter(user.Profile.DietTypeId, userAllergenIds.ToArray()).Matches(x))
+            .Where(x => personalFilter.Matches(x))
             .Select(recipe => new { Recipe = recipe, Matches = IngredientPreferences.MatchCount(recipe.Ingredients.Select(i => i.Ingredient.Name), preferences) })
             .ToList();
         var pantryMatches = preferences.Length > 0 ? scored.Where(item => item.Matches > 0).ToList() : [];
@@ -306,7 +306,8 @@ public class MealPlanService(
     private static bool IsPlanSuitable(MealPlan plan, User user)
     {
         if (user.Profile?.DietType is null) return false;
-        var filter = new PersonalRecipeFilter(user.Profile.DietTypeId, user.UserAllergens.Select(x => x.AllergenId).ToArray());
+        var filter = new PersonalRecipeFilter(user.Profile.DietTypeId, user.UserAllergens.Select(x => x.AllergenId).ToArray())
+        { AllergenNames = user.UserAllergens.Select(x => x.Allergen.Name).ToArray() };
         return plan.Meals.Count == 21 && plan.Meals.All(meal => filter.Matches(meal.Recipe));
     }
     public async Task<MealPlanResponse> GetByIdAsync(int id, int userId, string role, CancellationToken ct = default)

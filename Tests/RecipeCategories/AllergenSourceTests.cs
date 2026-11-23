@@ -141,8 +141,8 @@ static class AllergenSourceTests
         var baseline = (await Search()).Select(x => x.PostId).ToHashSet();
         foreach (var (ids, excluded) in new[] {
             (new[] { 1 }, new[] { 1,2,3,5,10 }),
-            (new[] { 1,2 }, new[] { 1,2,3,4,5,10 }),
-            (new[] { 2 }, new[] { 4 }),
+            (new[] { 1,2 }, new[] { 1,2,3,4,5,8,10 }),
+            (new[] { 2 }, new[] { 3,4,8 }),
             (Array.Empty<int>(), Array.Empty<int>()) })
         {
             await selection.UpdateAsync(1, new(ids.ToList()));
@@ -153,7 +153,8 @@ static class AllergenSourceTests
                 "unverified catalog progressively filters home/search for [" + string.Join(",", ids) + "]");
             var blocked = await matcher.FindUnsafeAsync(await db.Allergens.Where(a => ids.Contains(a.AllergenId)).ToListAsync(), allIngredients);
             Check(blocked.SetEquals(allIngredients.Where(i => (i.AllergenId.HasValue && ids.Contains(i.AllergenId.Value)) ||
-                i.AllergenLinks.Any(a => ids.Contains(a.AllergenId))).Select(i => i.IngredientId)),
+                i.AllergenLinks.Any(a => ids.Contains(a.AllergenId)) ||
+                (ids.Contains(2) && new[] {3,4,8}.Contains(i.IngredientId))).Select(i => i.IngredientId)),
                 "matcher uses recorded relations even when all profiles are unverified");
         }
         await selection.UpdateAsync(1, new([1]));
@@ -178,6 +179,83 @@ static class AllergenSourceTests
             "empty regeneration preserves the existing plan and its meal rows");
         for (var id=10; id<110; id++) db.Allergens.Add(new Allergen { AllergenId=id, Name="Test allergen "+id }); await db.SaveChangesAsync();
         Check((await selection.UpdateAsync(2,new(Enumerable.Range(10,100).ToList()))).Allergens.Count == 100, "no arbitrary selection limit");
+
+        db.Allergens.AddRange(new Allergen { AllergenId = 200, Name = "Nấm hương" }, new Allergen { AllergenId = 201, Name = "Đậu phộng" });
+        var mushroom = Ingredient(200, "NẤM HƯƠNG tươi", 1, false);
+        var kingOyster = Ingredient(201, "nam-dui-ga", 1, true);
+        var mushroomSeasoning = Ingredient(202, "Hạt nêm nấm", 1, false);
+        var potato = Ingredient(203, "Khoai tây", 1, false);
+        var peanuts = Ingredient(204, "Đậu phộng rang", 1, false);
+        var notMushroom = Ingredient(205, "Rau Namur", 1, false);
+        Recipe(200, "Bò Kho Chay", mushroom);
+        Recipe(201, "Món áp chảo", kingOyster, "VIDEO");
+        Recipe(202, "Canh rau", mushroomSeasoning);
+        Recipe(203, "Khoai hấp", potato);
+        Recipe(204, "Món đậu", peanuts);
+        Recipe(205, "Rau luộc", notMushroom);
+        Recipe(206, "Nấm chỉ nằm trong tiêu đề", potato);
+        await db.SaveChangesAsync();
+        await selection.UpdateAsync(1, new([200]));
+        var mushroomResults = await Search();
+        Check(!mushroomResults.Any(x => new[] {200,201,202}.Contains(x.PostId)) &&
+            mushroomResults.Any(x => x.PostId == 203) && mushroomResults.Any(x => x.PostId == 205),
+            "mushroom preference excludes exact/broad/accentless ingredient names without emptying unrelated recipes");
+        Check(mushroomResults.Any(x => x.PostId == 206), "keyword filtering uses ingredients, not dish titles");
+        Check((await Search(keyword: "Bò Kho Chay")).Count == 0, "exact title cannot bypass mushroom ingredient keywords");
+        Check((await posts.GetAsync(null,null,null,null,null,false,1)).Select(x => x.PostId).Order()
+            .SequenceEqual(mushroomResults.Select(x => x.PostId).Order()), "keyword home/search consistency includes recipe videos");
+        await selection.UpdateAsync(2, new([]));
+        Check((await Search(2)).Any(x => x.PostId == 200), "keyword exclusions stay isolated per account");
+        await selection.UpdateAsync(1, new([200,201]));
+        Check(!(await Search()).Any(x => new[] {200,201,202,204}.Contains(x.PostId)) &&
+            (await Search()).Any(x => x.PostId == 203), "multiple keyword preferences use ANY match");
+        await selection.UpdateAsync(1, new([201]));
+        Check((await Search()).Any(x => x.PostId == 200) && !(await Search()).Any(x => x.PostId == 204),
+            "removing mushroom preference immediately restores mushroom dishes");
+        await selection.UpdateAsync(1, new([200]));
+        db.PostRatings.Add(new PostRating { PostId = 200, UserId = 1, Rating = 5 });
+        await db.SaveChangesAsync();
+        Check((await posts.GetAsync(null,null,null,null,null,false,1,1,sort: "rating")).Single().PostId != 200,
+            "keyword exclusion happens before rating limit");
+        var mushroomFilter = await PersonalRecipeFilter.LoadAsync(db, 1, default);
+        using (var mysql = new VegetarianDbContext(new DbContextOptionsBuilder<VegetarianDbContext>()
+            .UseMySql("Server=localhost;Database=not_used;User=test;Password=test", new MySqlServerVersion(new Version(8,0,0))).Options))
+        {
+            var sql = mushroomFilter.Apply(mysql.Recipes).Take(1).ToQueryString();
+            Check(sql.Contains("IngredientId") && sql.Contains("LIMIT") && mushroomFilter.KeywordIngredientIds.Contains(200),
+                "keyword ingredient IDs translate into MySQL filtering before limit");
+        }
+        var keywordPlan = await planner.GenerateAsync(1, new(null,null,"MAINTAIN"));
+        Check(keywordPlan.Meals.Count == 21 && keywordPlan.Meals.All(x => !new[] {200,201,202}.Contains(x.RecipeId)),
+            "planner generation excludes mushroom keywords and keeps other recipes");
+        var keywordMeal = keywordPlan.Meals.First();
+        var keywordOptions = await planner.GetReplacementOptionsAsync(keywordPlan.MealPlanId, keywordMeal.MealPlanMealId, 1, null);
+        Check(keywordOptions.Count > 0 && keywordOptions.All(x => !new[] {200,201,202}.Contains(x.RecipeId)),
+            "planner replacement options use keyword exclusions");
+        try
+        {
+            await planner.ReplaceMealAsync(keywordPlan.MealPlanId, keywordMeal.MealPlanMealId, 1, 200);
+            throw new Exception("Keyword-blocked recipe replacement accepted");
+        }
+        catch (ServiceException error) when (error.StatusCode == 422) { Check(true, "explicit mushroom replacement rejected with 422"); }
+        related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Bò Kho Chay"));
+        Check(related.RelatedRecipes.Any(x => x.RecipeId == 200), "account without mushroom selection can discover mushroom recipe");
+        await selection.UpdateAsync(2, new([200]));
+        related = await chat.SendAsync(session.ChatSessionId, 2, "ADMIN", null, new("Bò Kho Chay"));
+        Check(related.RelatedRecipes.All(x => !new[] {200,201,202}.Contains(x.RecipeId)), "chat suggestions obey mushroom keywords");
+        var keywordBlocked = await matcher.FindUnsafeAsync(await db.Allergens.Where(x => x.AllergenId == 200).ToListAsync(),
+            await db.Ingredients.ToListAsync());
+        Check(keywordBlocked.Contains(200) && keywordBlocked.Contains(201) && keywordBlocked.Contains(202) && !keywordBlocked.Contains(203),
+            "compatibility matcher agrees with query keyword matching");
+        Check(AllergenKeywordRules.Matches(["Nấm"], "Nấm hương", false) &&
+            AllergenKeywordRules.Matches(["Nấm hương"], "  NẤM, đùi gà ", false) &&
+            !AllergenKeywordRules.Matches(["Nấm hương"], "Namur", false) &&
+            !AllergenKeywordRules.Matches(["Đậu phộng"], "Đậu gà", false),
+            "normalization handles decomposed accents and word boundaries without arbitrary token widening");
+        await selection.UpdateAsync(1, new([]));
+        Check((await Search()).Any(x => x.PostId == 200) && (await Search()).Any(x => x.PostId == 204),
+            "clearing allergies restores keyword-excluded recipes");
+
         Console.WriteLine($"SOURCE ALLERGEN TESTS: {checks} passed; isolated database only.");
     }
     sealed class Ai : IAiChatService { public Task<ChatbotReply> ReplyAsync(ChatbotRequest request, CancellationToken ct=default) => Task.FromResult(new ChatbotReply("Use the verified suggestions.", [])); }
