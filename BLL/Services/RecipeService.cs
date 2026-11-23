@@ -105,16 +105,8 @@ public class RecipeService(
 
     public async Task<IReadOnlyCollection<RecipeResponse>> SearchAsync(string? keyword, int? categoryId, string? categoryType, int? userId = null, CancellationToken cancellationToken = default)
     {
-        var query = BaseQuery().Where(x => x.Post.Status == "PUBLISHED" && x.Ingredients.Any() && !x.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup == "UNVERIFIED"));
-        if (userId.HasValue)
-        {
-            var profile = await db.UserProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == userId.Value, cancellationToken);
-            var allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
-            if (profile?.DietTypeId is int dietTypeId)
-                query = query.Where(x => x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId && d.IsCompatible));
-            if (allergenIds.Length > 0)
-                query = query.Where(x => !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value)));
-        }
+        var filter = await PersonalRecipeFilter.LoadAsync(db, userId, cancellationToken);
+        var query = filter.Apply(BaseQuery());
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.RecipeName.ToLower().Contains(term) || x.Post.Title.ToLower().Contains(term) || x.Ingredients.Any(i => i.Ingredient.Name.ToLower().Contains(term))); }
         if (categoryId.HasValue) query = query.Where(x => x.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
         return (await query.OrderByDescending(x => x.PostId).ToListAsync(cancellationToken)).Select(x => ToResponse(x)).ToList();
@@ -133,7 +125,7 @@ public class RecipeService(
         foreach (var dietTypeId in compatibleDietTypeIds) await dietCompatibilities.AddAsync(new RecipeDietCompatibility { RecipeId = recipeId, DietTypeId = dietTypeId, IsCompatible = true }, ct);
         await recipeCategories.SetMappingsAsync(recipeId, request.CategoryIds, groups, ct);
     }
-    private IQueryable<Recipe> BaseQuery() => recipes.Query().AsSplitQuery().Include(x => x.Post).ThenInclude(x => x.ModerationFlags).Include(x => x.CategoryMappings).ThenInclude(x => x.Category).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).Include(x => x.Steps).Include(x => x.DietCompatibilities);
+    private IQueryable<Recipe> BaseQuery() => recipes.Query().AsSplitQuery().Include(x => x.Post).ThenInclude(x => x.Ratings).Include(x => x.Post).ThenInclude(x => x.ModerationFlags).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.AllergenLinks).Include(x => x.CategoryMappings).ThenInclude(x => x.Category).Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category).Include(x => x.Steps).Include(x => x.DietCompatibilities);
     private IQueryable<Post> PostBaseQuery() => posts.Query().AsSplitQuery().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments).Include(x => x.Recipe).ThenInclude(x => x!.DietCompatibilities).ThenInclude(x => x.DietType);
     private async Task ValidateRelationsAsync(CreateRecipeRequest request, CancellationToken ct)
     {
@@ -145,7 +137,7 @@ public class RecipeService(
         var ids = values.Distinct().ToArray();
         if (ids.Length > 0 && await availableIds.CountAsync(id => ids.Contains(id), ct) != ids.Length) throw new ServiceException(message, 404);
     }
-    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing);
+    private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId, i.Ingredient.IngredientId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing, x.Post.Ratings.Count == 0 ? 0 : x.Post.Ratings.Average(r => r.Rating), x.Post.Ratings.Count, x.Ingredients.Where(i => !i.Ingredient.IsAllergenProfileVerified).Select(i => i.Ingredient.Name).Distinct().ToArray());
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,

@@ -14,10 +14,10 @@ public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPub
 
     public Task<List<IngredientResponse>> GetIngredientsAsync(string? keyword, CancellationToken ct)
     {
-        var query = db.Ingredients.AsNoTracking().AsQueryable();
+        var query = db.Ingredients.AsNoTracking().Include(x => x.AllergenLinks).AsQueryable();
         if (!string.IsNullOrWhiteSpace(keyword)) query = query.Where(x => x.Name.Contains(keyword.Trim()));
         return query.OrderBy(x => x.Name)
-            .Select(x => new IngredientResponse(x.IngredientId, x.Name, x.IngredientCategoryId, x.Category.DietaryGroup, x.AllergenId)).ToListAsync(ct);
+            .Select(x => new IngredientResponse(x.IngredientId, x.Name, x.IngredientCategoryId, x.Category.DietaryGroup, x.AllergenId, x.AllergenLinks.Select(a => a.AllergenId).ToArray(), x.IsAllergenProfileVerified, x.AllergenEvidence)).ToListAsync(ct);
     }
 
     public async Task<IngredientCategoryResponse> CreateCategoryAsync(IngredientCategoryRequest request, CancellationToken ct)
@@ -65,7 +65,7 @@ public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPub
 
     public async Task<IngredientResponse> UpdateAsync(int id, UpdateIngredientRequest request, CancellationToken ct)
     {
-        var ingredient = await db.Ingredients.SingleOrDefaultAsync(x => x.IngredientId == id, ct) ?? throw new ServiceException("Ingredient was not found.", 404);
+        var ingredient = await db.Ingredients.Include(x => x.AllergenLinks).SingleOrDefaultAsync(x => x.IngredientId == id, ct) ?? throw new ServiceException("Ingredient was not found.", 404);
         var category = await db.IngredientCategories.FindAsync([request.IngredientCategoryId], ct) ?? throw new ServiceException("Ingredient category was not found.", 404);
         if (request.AllergenId.HasValue && !await db.Allergens.AnyAsync(x => x.AllergenId == request.AllergenId.Value, ct)) throw new ServiceException("Allergen was not found.", 404);
         var name = request.Name.Trim();
@@ -73,20 +73,26 @@ public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPub
         if (await db.Ingredients.AnyAsync(x => x.IngredientId != id && x.Name == name, ct)) throw new ServiceException("An ingredient with this name already exists.", 409);
         var affectedRecipes = await db.RecipeIngredients.Where(x => x.IngredientId == id).Select(x => x.RecipeId).Distinct().ToListAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (ingredient.Name != name || ingredient.IngredientCategoryId != category.IngredientCategoryId || ingredient.AllergenId != request.AllergenId)
+        {
+            ingredient.IsAllergenProfileVerified = false;
+            ingredient.AllergenEvidence = null;
+        }
         ingredient.Name = name; ingredient.IngredientCategoryId = category.IngredientCategoryId; ingredient.Category = category; ingredient.AllergenId = request.AllergenId;
         await db.SaveChangesAsync(ct);
         await RefreshCompatibilityAsync(ct);
         await transaction.CommitAsync(ct);
         foreach (var recipeId in affectedRecipes) await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
-        return new(ingredient.IngredientId, ingredient.Name, category.IngredientCategoryId, category.DietaryGroup, ingredient.AllergenId);
+        return new(ingredient.IngredientId, ingredient.Name, category.IngredientCategoryId, category.DietaryGroup, ingredient.AllergenId, ingredient.AllergenLinks.Select(a => a.AllergenId).ToArray(), ingredient.IsAllergenProfileVerified, ingredient.AllergenEvidence);
     }
 
     public async Task<IReadOnlyList<(Ingredient Ingredient, string? Amount)>> ResolveAsync(IEnumerable<IngredientRequest> requests, CancellationToken ct)
     {
         var items = requests.Select(x => (Request: x, Name: x.IngredientName.Trim(), Code: VegetarianDietRules.NormalizeIngredientGroup(x.DietaryGroup))).ToList();
+        var ids = items.Where(x => x.Request.IngredientId.HasValue).Select(x => x.Request.IngredientId!.Value).ToArray();
         var names = items.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var categories = await db.IngredientCategories.ToDictionaryAsync(x => x.Code, ct);
-        var existing = await db.Ingredients.Include(x => x.Category).Where(x => names.Contains(x.Name)).ToListAsync(ct);
+        var existing = await db.Ingredients.Include(x => x.Category).Include(x => x.AllergenLinks).Where(x => names.Contains(x.Name) || ids.Contains(x.IngredientId)).ToListAsync(ct);
         var byName = existing.ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
         var requestedAllergens = items.Where(x => x.Request.AllergenId.HasValue).Select(x => x.Request.AllergenId!.Value).Distinct().ToArray();
         if (await db.Allergens.CountAsync(x => requestedAllergens.Contains(x.AllergenId), ct) != requestedAllergens.Length)
@@ -96,13 +102,22 @@ public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPub
         foreach (var item in items)
         {
             if (!categories.TryGetValue(item.Code, out var category)) throw new ServiceException("Ingredient categories have not been configured.", 500);
-            if (!byName.TryGetValue(item.Name, out var ingredient))
+            Ingredient? ingredient;
+            if (item.Request.IngredientId.HasValue)
+            {
+                ingredient = existing.SingleOrDefault(x => x.IngredientId == item.Request.IngredientId.Value)
+                    ?? throw new ServiceException("Canonical ingredient was not found.", 404);
+                if (!string.Equals(ingredient.Name, item.Name, StringComparison.OrdinalIgnoreCase))
+                    throw new ServiceException("Use the canonical ingredient name for the selected ingredientId.", 409);
+            }
+            else byName.TryGetValue(item.Name, out ingredient);
+            if (ingredient is null)
             {
                 ingredient = new Ingredient { Name = item.Name, Category = category, AllergenId = item.Request.AllergenId };
                 db.Ingredients.Add(ingredient);
                 byName.Add(item.Name, ingredient);
             }
-            else if (ingredient.Category.DietaryGroup != item.Code || (item.Request.AllergenId.HasValue && ingredient.AllergenId != item.Request.AllergenId))
+            else if (ingredient.Category.DietaryGroup != item.Code || (item.Request.AllergenId.HasValue && ingredient.AllergenId != item.Request.AllergenId && !ingredient.AllergenLinks.Any(a => a.AllergenId == item.Request.AllergenId)))
             {
                 throw new ServiceException($"Ingredient '{ingredient.Name}' conflicts with its existing category or allergen. Use the classification in the ingredient catalog.", 409);
             }
@@ -110,6 +125,31 @@ public class IngredientCatalogService(VegetarianDbContext db, ICommunityEventPub
         }
         await db.SaveChangesAsync(ct);
         return result;
+    }
+
+    public async Task<IngredientResponse> ReviewAllergensAsync(int id, ReviewIngredientAllergensRequest request, CancellationToken ct)
+    {
+        var ingredient = await db.Ingredients.Include(x => x.Category).Include(x => x.AllergenLinks)
+            .SingleOrDefaultAsync(x => x.IngredientId == id, ct) ?? throw new ServiceException("Ingredient was not found.", 404);
+        if (request.AllergenIds is null) throw new ServiceException("allergenIds is required.", 400);
+        var ids = request.AllergenIds.Distinct().ToArray();
+        if (ids.Any(x => x <= 0) || await db.Allergens.CountAsync(x => ids.Contains(x.AllergenId), ct) != ids.Length)
+            throw new ServiceException("All mapping IDs must reference existing allergens.", 400);
+        if (request.IsVerified && string.IsNullOrWhiteSpace(request.Evidence))
+            throw new ServiceException("Verification requires source/composition evidence. Use a source-specific catalog name; do not infer from a generic name.", 400);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        db.IngredientAllergens.RemoveRange(ingredient.AllergenLinks.Where(x => !ids.Contains(x.AllergenId)));
+        foreach (var allergenId in ids.Except(ingredient.AllergenLinks.Select(x => x.AllergenId)))
+            db.IngredientAllergens.Add(new IngredientAllergen { IngredientId = id, AllergenId = allergenId });
+        ingredient.AllergenId = ids.Length == 0 ? null : ids.Min();
+        ingredient.IsAllergenProfileVerified = request.IsVerified;
+        ingredient.AllergenEvidence = request.Evidence?.Trim();
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        foreach (var recipeId in await db.RecipeIngredients.Where(x => x.IngredientId == id).Select(x => x.RecipeId).Distinct().ToListAsync(ct))
+            await communityEvents.PublishAsync(new CommunityEvent("postUpdated", recipeId), ct);
+        return new(id, ingredient.Name, ingredient.IngredientCategoryId, ingredient.Category.DietaryGroup, ingredient.AllergenId,
+            ids.Order().ToArray(), ingredient.IsAllergenProfileVerified, ingredient.AllergenEvidence);
     }
 
     public async Task RefreshCompatibilityAsync(CancellationToken ct)

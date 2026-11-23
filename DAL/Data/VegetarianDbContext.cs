@@ -16,6 +16,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
     public DbSet<Recipe> Recipes => Set<Recipe>();
     public DbSet<IngredientCategory> IngredientCategories => Set<IngredientCategory>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
+    public DbSet<IngredientAllergen> IngredientAllergens => Set<IngredientAllergen>();
     public DbSet<RecipeCategory> RecipeCategories => Set<RecipeCategory>();
     public DbSet<RecipeCategoryMapping> RecipeCategoryMappings => Set<RecipeCategoryMapping>();
     public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
@@ -54,9 +55,19 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.DietaryGroup).HasMaxLength(30).IsUnicode(false).IsRequired();
             entity.HasIndex(x => x.Code).IsUnique();
         });
+        modelBuilder.Entity<IngredientAllergen>(entity =>
+        {
+            entity.ToTable("IngredientAllergens");
+            entity.HasKey(x => new { x.IngredientId, x.AllergenId });
+            entity.HasIndex(x => x.AllergenId);
+            entity.HasOne(x => x.Ingredient).WithMany(x => x.AllergenLinks).HasForeignKey(x => x.IngredientId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Allergen).WithMany().HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.Restrict);
+        });
         modelBuilder.Entity<Ingredient>(entity =>
         {
             entity.ToTable("Ingredients");
+            entity.Property(x => x.IsAllergenProfileVerified).HasDefaultValue(false);
+            entity.Property(x => x.AllergenEvidence).HasMaxLength(1000);
             entity.HasKey(x => x.IngredientId);
             entity.Property(x => x.Name).HasMaxLength(200).UseCollation("utf8mb4_0900_as_ci").IsRequired();
             entity.HasIndex(x => x.Name).IsUnique();

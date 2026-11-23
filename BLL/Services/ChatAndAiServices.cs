@@ -74,16 +74,6 @@ public class NutritionChatbotService(
 
         var user = userId.HasValue ? await users.Query().AsNoTracking().Include(x => x.Profile).ThenInclude(x => x!.DietType)
             .Include(x => x.UserAllergens).ThenInclude(x => x.Allergen).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken) : null;
-        var userAllergens = user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [];
-        if (TryBuildAllergenConflictReply(request.Content, userAllergens, out var blockedReply))
-        {
-            var blockedResponse = new ChatMessage { ChatSessionId = id, Sender = "AI", Content = blockedReply, CreatedAt = VietnamTime.Now };
-            await messages.AddAsync(blockedResponse, cancellationToken);
-            await messages.SaveChangesAsync(cancellationToken);
-            int? remaining = session.UserId.HasValue ? null : GuestMessageLimit - guestMessageCount - 1;
-            return new(blockedResponse.ChatMessageId, blockedReply, [], [], remaining, false);
-        }
-
         var history = await messages.Query().AsNoTracking().Where(x => x.ChatSessionId == id && x.ChatMessageId != userMessage.ChatMessageId)
             .OrderByDescending(x => x.ChatMessageId).Take(8).ToListAsync(cancellationToken);
         var relatedRecipes = await GetRelatedRecipesAsync(user, request.Content, cancellationToken);
@@ -103,21 +93,6 @@ public class NutritionChatbotService(
         return new(response.ChatMessageId, chatbotReply.Answer, relatedRecipes, knowledge.Sources, remainingMessages, false);
     }
 
-    private static bool TryBuildAllergenConflictReply(string message, IReadOnlyCollection<Allergen> userAllergens, out string reply)
-    {
-        foreach (var allergen in userAllergens)
-        {
-            var matchedAlias = GetAllergenAliases(allergen).FirstOrDefault(alias => AllergenLexicon.ContainsTerm(message, alias));
-            if (matchedAlias is null) continue;
-
-            reply = BuildAllergenConflictReply(allergen.Name);
-            return true;
-        }
-
-        reply = string.Empty;
-        return false;
-    }
-
     private static IEnumerable<string> GetAllergenAliases(Allergen allergen)
     {
         foreach (var term in AllergenLexicon.Terms(allergen)) yield return term;
@@ -126,18 +101,13 @@ public class NutritionChatbotService(
                 yield return alias;
     }
 
-    private static string BuildAllergenConflictReply(string allergen) =>
-        $"Món này không phù hợp với hồ sơ dị ứng của bạn vì có liên quan đến {allergen}. Mình không thể hướng dẫn công thức chứa nguyên liệu đó.\n\nBạn có thể đổi sang món an toàn hơn như sữa yến mạch, sữa gạo, sữa dừa hoặc một món chay không dùng nhóm nguyên liệu gây dị ứng này. Nếu dị ứng nặng, nhớ kiểm tra nhãn nguyên liệu và hỏi chuyên gia y tế khi cần nhé.";
-
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(User? user, string message, CancellationToken ct)
     {
         var allergens = user?.UserAllergens.Select(x => x.AllergenId).ToArray() ?? [];
         var dietTypeId = user?.Profile?.DietTypeId;
-        var query = recipes.Query().AsNoTracking().Where(x => x.Post.Status == "PUBLISHED"
-            && x.Ingredients.Any()
-            && !x.Ingredients.Any(i => i.Ingredient.Category.DietaryGroup != "PLANT" && i.Ingredient.Category.DietaryGroup != "DAIRY" && i.Ingredient.Category.DietaryGroup != "EGG" && i.Ingredient.Category.DietaryGroup != "HONEY")
-            && !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergens.Contains(i.Ingredient.AllergenId.Value))
-            && (!dietTypeId.HasValue || x.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId.Value && d.IsCompatible)));
+        _ = allergenMatcher; // Keep DI compatibility; source eligibility uses the reviewed catalog.
+        var filter = new PersonalRecipeFilter(dietTypeId, allergens);
+        var query = filter.Apply(recipes.Query().AsNoTracking());
         var terms = message.Split([' ', ',', '.', '?', '!', ':', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(x => x.Length >= 3).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToArray();
         if (terms.Length == 0) return [];
@@ -151,21 +121,8 @@ public class NutritionChatbotService(
         }
         var ranking = Expression.Lambda<Func<Recipe, int>>(score, parameter);
         var matched = Expression.Lambda<Func<Recipe, bool>>(Expression.GreaterThan(score, Expression.Constant(0)), parameter);
-        // Check names and aliases after SQL ranking: user-defined allergies may not
-        // have an Ingredient.AllergenId assigned in the shared catalog yet.
-        var candidates = await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId).Take(30)
-            .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
-            .AsSplitQuery().ToListAsync(ct);
-        var unsafeIds = await allergenMatcher.FindUnsafeAsync(user?.UserAllergens.Select(x => x.Allergen).ToArray() ?? [],
-            candidates.SelectMany(x => x.Ingredients).Select(x => x.Ingredient).DistinctBy(x => x.IngredientId).ToArray(), ct);
-        return candidates
-            .Where(recipe => !recipe.Ingredients.Any(item =>
-                unsafeIds.Contains(item.IngredientId) ||
-                user?.UserAllergens.Any(allergy =>
-                    !(item.Ingredient.Category.DietaryGroup == VegetarianDietRules.Plant &&
-                      allergy.Allergen.Name.Equals("Milk", StringComparison.OrdinalIgnoreCase)) &&
-                    AllergenLexicon.Terms(allergy.Allergen).Any(term => AllergenLexicon.ContainsTerm(item.Ingredient.Name, term))) == true))
-            .Take(5).Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToList();
+        return await query.Where(matched).OrderByDescending(ranking).ThenByDescending(x => x.PostId)
+            .Take(5).Select(x => new RelatedRecipeResponse(x.PostId, x.RecipeName)).ToListAsync(ct);
     }
 
     private sealed class RecipeParameterVisitor(ParameterExpression source, ParameterExpression target) : ExpressionVisitor

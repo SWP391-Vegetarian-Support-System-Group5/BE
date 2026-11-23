@@ -17,5 +17,8 @@ public class Ingredient
     public int? AllergenId { get; set; }
     public IngredientCategory Category { get; set; } = null!;
     public Allergen? Allergen { get; set; }
+    public bool IsAllergenProfileVerified { get; set; }
+    public string? AllergenEvidence { get; set; }
+    public ICollection<IngredientAllergen> AllergenLinks { get; set; } = new List<IngredientAllergen>();
     public ICollection<RecipeIngredient> Recipes { get; set; } = new List<RecipeIngredient>();
 }

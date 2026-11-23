@@ -31,26 +31,24 @@ public class PostService(
         return response;
     }
 
-    public async Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<PostResponse>> GetAsync(string? keyword, int? categoryId, string? postType, string? categoryType, string? status, bool isAdmin, int? actorId = null, int? limit = null, CancellationToken cancellationToken = default, string? sort = null)
     {
         var query = BaseQuery();
         if (!isAdmin) query = query.Where(x => x.Status == "PUBLISHED");
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
-        // Recipe cards are personalized for signed-in members. Non-recipe community
-        // posts stay visible; only foods conflicting with diet/allergy are excluded.
-        if (!isAdmin && actorId.HasValue)
+        if (!isAdmin)
         {
-            var profile = await db.UserProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.UserId == actorId.Value, cancellationToken);
-            var allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == actorId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
-            if (profile?.DietTypeId is int dietTypeId)
-                query = query.Where(x => x.PostType != "RECIPE" || (x.Recipe != null && x.Recipe.DietCompatibilities.Any(d => d.DietTypeId == dietTypeId && d.IsCompatible)));
-            if (allergenIds.Length > 0)
-                query = query.Where(x => x.PostType != "RECIPE" || (x.Recipe != null && !x.Recipe.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value))));
+            var filter = await PersonalRecipeFilter.LoadAsync(db, actorId, cancellationToken);
+            var eligibleIds = filter.Apply(db.Recipes).Select(x => x.PostId);
+            query = query.Where(x => x.Recipe == null ? x.PostType != "RECIPE" : eligibleIds.Contains(x.Recipe.PostId));
         }
         if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
         if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
         if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
-        query = query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
+        if (sort is not null && sort != "rating" && sort != "latest") throw new ServiceException("sort must be rating or latest.", 400);
+        query = sort == "rating"
+            ? query.OrderByDescending(x => x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating)).ThenByDescending(x => x.Ratings.Count).ThenByDescending(x => x.PostId)
+            : query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
         if (limit is > 0) query = query.Take(limit.Value);
         return (await query.ToListAsync(cancellationToken)).Select(x => ToResponse(x, actorId)).ToList();
     }
@@ -216,8 +214,14 @@ public class PostService(
     {
         var bookmark = await bookmarks.FindAsync(userId, postId) ?? throw new ServiceException("Bookmark was not found.", 404); bookmarks.Remove(bookmark); await bookmarks.SaveChangesAsync(cancellationToken);
     }
-    public async Task<IReadOnlyCollection<PostResponse>> GetBookmarksAsync(int userId, CancellationToken cancellationToken = default) =>
-        (await BaseQuery().Where(x => x.Status == "PUBLISHED" && x.Bookmarks.Any(b => b.UserId == userId)).ToListAsync(cancellationToken)).Select(x => ToResponse(x, userId)).ToList();
+    public async Task<IReadOnlyCollection<PostResponse>> GetBookmarksAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        var filter = await PersonalRecipeFilter.LoadAsync(db, userId, cancellationToken);
+        var eligibleIds = filter.Apply(db.Recipes).Select(x => x.PostId);
+        return (await BaseQuery().Where(x => x.Status == "PUBLISHED" && x.Bookmarks.Any(b => b.UserId == userId))
+            .Where(x => x.Recipe == null ? x.PostType != "RECIPE" : eligibleIds.Contains(x.Recipe.PostId))
+            .ToListAsync(cancellationToken)).Select(x => ToResponse(x, userId)).ToList();
+    }
 
     private IQueryable<Post> BaseQuery() => posts.Query().AsSplitQuery().Include(x => x.User).ThenInclude(x => x.Profile).Include(x => x.Ratings).Include(x => x.Comments).Include(x => x.ModerationFlags).Include(x => x.Recipe).ThenInclude(x => x!.DietCompatibilities).ThenInclude(x => x.DietType);
     private static PostResponse ToResponse(Post x, int? actorId = null) => new(
