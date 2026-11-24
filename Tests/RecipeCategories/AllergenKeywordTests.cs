@@ -16,6 +16,17 @@ static class AllergenKeywordTests
         Check(!IngredientAllergyMatch.NameMatches("nấm đùi gà", "nấm hương"), "specific selection does not invent other allergies");
         Check(IngredientAllergyMatch.NameMatches("lạc rang", "Đậu phộng"), "remote peanut aliases retained");
         Check(IngredientAllergyMatch.NameMatches("shiitake khô", "nấm hương"), "specific mushroom alias retained");
+        foreach (var (allergen, ingredient) in new[]
+        {
+            ("Đậu nành", "tàu hũ ky"), ("Soy", "DAU PHU NON"), ("Đậu tương", "nước tương"),
+            ("Soybean", "tempeh"), ("Sữa", "bơ lạt"), ("Milk", "whey protein"), ("Trứng", "ovalbumin"),
+            ("Egg", "mayonnaise"), ("Đậu phộng", "groundnuts"), ("Peanut", "bơ lạc"),
+            ("Gluten", "seitan"), ("Gluten", "đại mạch"), ("Tree Nut", "hạt dẻ cười"), ("Vừng", "tahini")
+        })
+            Check(IngredientAllergyMatch.NameMatches(ingredient, allergen), $"{allergen} excludes {ingredient}");
+        Check(!IngredientAllergyMatch.NameMatches("đậu xanh", "Đậu nành"), "soy does not exclude unrelated beans");
+        Check(!IngredientAllergyMatch.NameMatches("củ lạc tiên", "Lạc"), "peanut does not exclude unrelated lạc tiên");
+        Check(!IngredientAllergyMatch.NameMatches("hạt điều", "hạnh nhân"), "individual nut does not expand to the tree-nut group");
         await using var db = new VegetarianDbContext(new DbContextOptionsBuilder<VegetarianDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var category = new IngredientCategory { IngredientCategoryId = 1, Name = "Plants", Code = "PLANT", DietaryGroup = "PLANT" };
         var names = new[] { "Nấm hương", "nấm đùi gà", "cà rốt", "NAM HUONG kho" };

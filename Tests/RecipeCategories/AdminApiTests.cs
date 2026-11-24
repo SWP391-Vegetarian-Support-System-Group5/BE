@@ -126,6 +126,66 @@ static class AdminApiTests
                 await Send("PUT", "/api/users/me/allergens", 400, new { allergenIds = new[] { -1 } }, user);
                 var unchanged = await Send("GET", "/api/users/me/allergens", 200, token: user);
                 if (unchanged.GetProperty("allergens").GetArrayLength() != 1) throw new Exception("Invalid IDs changed saved selection.");
+                var recipeWithVideo = await Send("POST", "/api/recipes", 201, new
+                {
+                    title = "Tàu hũ kho", content = "Món dùng tàu hũ", recipeName = "Tàu hũ kho",
+                    videoUrl = "https://res.cloudinary.com/test/video/upload/tofu.mp4",
+                    ingredients = new[] { new { ingredientName = "TAU HU", amount = "100g", dietaryGroup = "PLANT" } },
+                    steps = new[] { new { stepNumber = 1, instruction = "Kho" } }
+                }, admin);
+                var tofuRecipeId = recipeWithVideo.GetProperty("postId").GetInt32();
+                foreach (var endpoint in new[] { "/api/posts", "/api/recipes/search" })
+                {
+                    var filtered = await Send("GET", endpoint, 200, token: user);
+                    var unfiltered = await Send("GET", endpoint, 200, token: thirdToken);
+                    if (filtered.EnumerateArray().Any(item => item.GetProperty("postId").GetInt32() == tofuRecipeId)
+                        || !unfiltered.EnumerateArray().Any(item => item.GetProperty("postId").GetInt32() == tofuRecipeId))
+                        throw new Exception("A recipe with video and unmapped TAU HU must be excluded only for the soy-allergic account.");
+                }
+
+                var titleCases = new[]
+                {
+                    ("Đậu nành", "Cách làm TÀU HŨ tại nhà", "VIDEO"),
+                    ("Milk", "Cách làm SUA CHUA tại nhà", "BLOG"),
+                    ("Egg", "Cách làm mayonnaise", "BLOG"),
+                    ("Peanut", "Cách làm bơ lạc", "VIDEO"),
+                    ("Gluten", "Cách làm mì căn", "BLOG"),
+                    ("Tree Nut", "Cách rang hạt dẻ cười", "VIDEO"),
+                    ("Sesame", "Cách làm tahini", "BLOG")
+                };
+                using (var scope = app.Services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                    db.Allergens.AddRange(titleCases.Skip(1).Select(item => new Allergen { Name = item.Item1 }));
+                    var plant = await db.IngredientCategories.SingleAsync(x => x.Code == "PLANT");
+                    var safeDish = new Post { UserId = 1, Title = "Cách làm sữa chua dừa đã xác minh", Content = "Test", PostType = "RECIPE", Status = "PUBLISHED" };
+                    db.Recipes.Add(new Recipe
+                    {
+                        Post = safeDish, RecipeName = safeDish.Title,
+                        Ingredients = [new RecipeIngredient { Ingredient = new Ingredient
+                        {
+                            Name = "Sữa chua dừa", Category = plant, IsAllergenProfileVerified = true, AllergenEvidence = "Test coconut-only label"
+                        } }]
+                    });
+                    db.Posts.AddRange(titleCases.Select(item => new Post
+                    {
+                        UserId = 1, Title = item.Item2, Content = "Test", PostType = item.Item3, Status = "PUBLISHED"
+                    }));
+                    await db.SaveChangesAsync();
+                }
+                var catalog = await Send("GET", "/api/allergens", 200, token: user);
+                foreach (var (name, title, _) in titleCases)
+                {
+                    var id = catalog.EnumerateArray().Single(item => item.GetProperty("name").GetString() == name).GetProperty("id").GetInt32();
+                    await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = new[] { id } }, user);
+                    var filtered = await Send("GET", "/api/posts", 200, token: user);
+                    bool HasTitle(string expected) => filtered.EnumerateArray().Any(item => item.GetProperty("title").GetString() == expected);
+                    if (HasTitle(title) || !HasTitle("Cách làm sữa chua dừa đã xác minh"))
+                        throw new Exception($"Title fallback did not respect the {name} profile and confirmed recipe ingredients.");
+                }
+                var guest = await Send("GET", "/api/posts", 200);
+                if (titleCases.Any(test => !guest.EnumerateArray().Any(item => item.GetProperty("title").GetString() == test.Item2)))
+                    throw new Exception("Guest feed must keep posts excluded only by personal allergy selections.");
                 var cleared = await Send("PUT", "/api/users/me/allergens", 200, new { allergenIds = Array.Empty<int>() }, user);
                 if (cleared.GetProperty("allergens").GetArrayLength() != 0) throw new Exception("Empty selection was not saved.");
                 await Send("PUT", "/api/admin/ingredients/1/allergens", 403, new { allergenIds = new[] { selectedCatalogId }, isVerified = true, evidence = "Test" }, user);

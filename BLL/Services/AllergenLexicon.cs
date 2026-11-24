@@ -11,12 +11,40 @@ public static class AllergenLexicon
     {
         ["Egg"] = ["egg", "eggs", "trứng", "trung", "lòng đỏ", "lòng trắng"],
         ["Milk"] = ["milk", "dairy", "sữa", "sua", "sữa bò", "cheese", "phô mai", "whey", "casein"],
-        ["Peanut"] = ["peanut", "peanuts", "đậu phộng", "lạc"],
-        ["Soy"] = ["soy", "soya", "đậu nành", "đậu tương", "tofu", "đậu hũ"],
+        ["Peanut"] = ["peanut", "peanuts", "đậu phộng", "lạc", "đậu lạc"],
+        ["Soy"] = ["soy", "soya", "soybean", "soybeans", "đậu nành", "đậu tương", "tofu", "đậu hũ"],
         ["Gluten"] = ["gluten", "wheat", "lúa mì", "bột mì", "mì căn"],
-        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "hạnh nhân", "almond", "hạt điều", "cashew"],
+        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "các loại hạt cây", "hạnh nhân", "almond", "hạt điều", "cashew"],
         ["Sesame"] = ["sesame", "mè", "vừng"]
     };
+
+    // Ingredient names used for discovery. Keep product names separate from profile aliases.
+    private static readonly Dictionary<string, string[]> IngredientNames = new()
+    {
+        ["egg"] = ["trứng gà", "trứng vịt", "trứng cút", "bột trứng", "lòng đỏ", "lòng trắng", "egg white", "egg yolk", "ovalbumin", "albumen", "mayonnaise", "mayo", "meringue"],
+        ["milk"] = ["sữa bò", "sữa dê", "sữa cừu", "sữa bột", "sữa đặc", "bơ sữa", "bơ lạt", "bơ mặn", "butter", "buttermilk", "ghee", "kem sữa", "kem tươi", "whipping cream", "sữa chua", "yogurt", "yoghurt", "phô mai", "phô mát", "cheese", "whey", "casein", "caseinate", "lactalbumin"],
+        ["peanut"] = ["peanuts", "đậu phộng", "đậu lạc", "lạc rang", "lạc luộc", "bơ lạc", "dầu lạc", "bột lạc", "groundnut", "groundnuts"],
+        ["soy"] = ["soya", "soybean", "soybeans", "đậu nành", "đậu tương", "đậu hũ", "tàu hũ", "đậu phụ", "tofu", "bean curd", "phù trúc", "váng đậu", "yuba", "chao", "tempeh", "edamame", "miso", "nước tương", "xì dầu", "tàu vị yểu", "tamari", "shoyu", "lecithin đậu nành"],
+        ["gluten"] = ["wheat", "lúa mì", "bột mì", "mì căn", "seitan", "durum", "semolina", "spelt", "bulgur", "couscous", "barley", "đại mạch", "rye", "lúa mạch đen", "triticale"],
+        ["tree nut"] = ["hạt cây", "các loại hạt cây", "hạnh nhân", "almond", "almonds", "hạt điều", "cashew", "cashews", "óc chó", "walnut", "walnuts", "hạt dẻ cười", "pistachio", "pistachios", "hạt phỉ", "hazelnut", "hazelnuts", "mắc ca", "macadamia", "pecan", "pecans", "hạt hồ đào", "hạt Brazil", "Brazil nut", "Brazil nuts", "hạt thông", "pine nut", "pine nuts"],
+        ["sesame"] = ["mè", "vừng", "tahini", "tahina", "benne", "gingelly", "sesamum"]
+    };
+
+    private static readonly Dictionary<string, string[]> NormalizedIngredientNames = IngredientNames
+        .ToDictionary(group => group.Key, group => group.Value.Select(Normalize).Distinct().ToArray());
+
+    private static readonly Dictionary<string, string[]> KnownByAlias = Known
+        .SelectMany(group => group.Value.Append(group.Key).Select(alias => (Alias: Normalize(alias), Terms: group.Value)))
+        .GroupBy(entry => entry.Alias)
+        .ToDictionary(group => group.Key, group => group.First().Terms);
+
+    public static IReadOnlyCollection<string> IngredientTerms(string allergenName)
+    {
+        var name = Normalize(allergenName);
+        var key = DuplicateKey(name);
+        if (key == "tree nut" && name is not ("tree nut" or "tree nuts" or "hat cay" or "cac loai hat cay")) return [];
+        return NormalizedIngredientNames.GetValueOrDefault(key) ?? [];
+    }
 
     public static string Normalize(string value)
     {
@@ -39,12 +67,7 @@ public static class AllergenLexicon
 
     public static string DuplicateKey(string name) => Normalize(KnownTerms(name)?.FirstOrDefault() ?? name);
 
-    private static string[]? KnownTerms(string name)
-    {
-        var normalizedName = Normalize(name);
-        return Known.FirstOrDefault(group => Normalize(group.Key) == normalizedName ||
-            group.Value.Any(alias => Normalize(alias) == normalizedName)).Value;
-    }
+    private static string[]? KnownTerms(string name) => KnownByAlias.GetValueOrDefault(Normalize(name));
 
     public static bool ContainsTerm(string text, string term)
     {

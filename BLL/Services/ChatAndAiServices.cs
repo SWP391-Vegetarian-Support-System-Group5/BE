@@ -26,15 +26,6 @@ public class NutritionChatbotService(
     ILogger<NutritionChatbotService>? logger = null) : IChatService
 {
     private const int GuestMessageLimit = 5;
-    private static readonly IReadOnlyDictionary<string, string[]> AllergenAliases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Soy"] = ["soy", "soya", "đậu nành", "dau nanh", "đậu tương", "dau tuong", "sữa đậu nành", "sua dau nanh", "tofu", "đậu hũ", "dau hu", "tàu hũ", "tau hu", "nước tương", "nuoc tuong", "xì dầu", "xi dau", "miso", "tempeh", "edamame"],
-        ["Milk"] = ["milk", "dairy", "sữa", "sua", "sữa bò", "sua bo", "phô mai", "pho mai", "cheese", "bơ sữa", "bo sua", "butter", "cream", "kem", "yogurt", "yoghurt", "sữa chua", "sua chua", "whey", "casein"],
-        ["Egg"] = ["egg", "eggs", "trứng", "trung", "lòng đỏ", "long do", "lòng trắng", "long trang", "mayonnaise", "mayo"],
-        ["Peanut"] = ["peanut", "peanuts", "đậu phộng", "dau phong", "lạc", "lac", "bơ đậu phộng", "bo dau phong"],
-        ["Gluten"] = ["gluten", "wheat", "lúa mì", "lua mi", "bột mì", "bot mi", "mì căn", "mi can", "seitan", "barley", "đại mạch", "dai mach", "rye"],
-        ["Tree Nut"] = ["tree nut", "tree nuts", "hạt cây", "hat cay", "almond", "hạnh nhân", "hanh nhan", "cashew", "hạt điều", "hat dieu", "walnut", "óc chó", "oc cho", "hazelnut", "pistachio", "macadamia"]
-    };
 
     public async Task<ChatSessionResponse> CreateSessionAsync(int? userId, CancellationToken cancellationToken = default)
     {
@@ -93,13 +84,8 @@ public class NutritionChatbotService(
         return new(response.ChatMessageId, chatbotReply.Answer, relatedRecipes, knowledge.Sources, remainingMessages, false);
     }
 
-    private static IEnumerable<string> GetAllergenAliases(Allergen allergen)
-    {
-        foreach (var term in AllergenLexicon.Terms(allergen)) yield return term;
-        if (AllergenAliases.TryGetValue(allergen.Name, out var aliases))
-            foreach (var alias in aliases)
-                yield return alias;
-    }
+    private static IEnumerable<string> GetAllergenAliases(Allergen allergen) =>
+        AllergenLexicon.Terms(allergen).Concat(AllergenLexicon.IngredientTerms(allergen.Name));
 
     private async Task<IReadOnlyCollection<RelatedRecipeResponse>> GetRelatedRecipesAsync(User? user, string message, CancellationToken ct)
     {
