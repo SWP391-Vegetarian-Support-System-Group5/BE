@@ -9,6 +9,7 @@ namespace BLL.Services;
 public sealed record PersonalRecipeFilter(int? DietTypeId, int[] AllergenIds)
 {
     public int[] NameMatchedIngredientIds { get; init; } = [];
+    public string[] AllergenNames { get; init; } = [];
 
     public static async Task<PersonalRecipeFilter> LoadAsync(VegetarianDbContext db, int? userId, CancellationToken ct)
     {
@@ -24,9 +25,13 @@ public sealed record PersonalRecipeFilter(int? DietTypeId, int[] AllergenIds)
         var filter = new PersonalRecipeFilter(diet, allergens.Select(a => a.AllergenId).ToArray());
         if (allergens.Count == 0) return filter;
         // Normalize the small ingredient catalog in .NET, then filter recipes in SQL before ordering/limit.
-        var names = await ingredients.Select(i => new { i.IngredientId, i.Name }).Distinct().ToListAsync(ct);
-        return filter with { NameMatchedIngredientIds = names.Where(i => allergens.Any(a =>
-            IngredientAllergyMatch.NameMatches(i.Name, a.Name))).Select(i => i.IngredientId).ToArray() };
+        var names = await ingredients.Select(i => new { i.IngredientId, i.Name, i.IsAllergenProfileVerified }).Distinct().ToListAsync(ct);
+        return filter with
+        {
+            AllergenNames = allergens.Select(a => a.Name).ToArray(),
+            NameMatchedIngredientIds = names.Where(i => allergens.Any(a =>
+                IngredientAllergyMatch.NameMatches(i.Name, a.Name, i.IsAllergenProfileVerified))).Select(i => i.IngredientId).ToArray()
+        };
     }
 
     public Expression<Func<Recipe, bool>> Predicate => recipe =>

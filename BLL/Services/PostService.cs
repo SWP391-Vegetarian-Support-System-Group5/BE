@@ -36,16 +36,25 @@ public class PostService(
         var query = BaseQuery();
         if (!isAdmin) query = query.Where(x => x.Status == "PUBLISHED");
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
+        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
+        if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
+        if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
+        if (sort is not null && sort != "rating" && sort != "latest") throw new ServiceException("sort must be rating or latest.", 400);
         if (!isAdmin)
         {
             var filter = await PersonalRecipeFilter.LoadAsync(db, actorId, cancellationToken);
             var eligibleIds = filter.Apply(db.Recipes).Select(x => x.PostId);
             query = query.Where(x => x.Recipe == null ? x.PostType != "RECIPE" : eligibleIds.Contains(x.Recipe.PostId));
+            if (filter.AllergenNames.Length > 0)
+            {
+                var titles = await query.Where(x => x.Recipe == null)
+                    .Select(x => new { x.PostId, x.Title }).ToListAsync(cancellationToken);
+                var excludedIds = titles.Where(x => filter.AllergenNames.Any(name => IngredientAllergyMatch.NameMatches(x.Title, name)))
+                    .Select(x => x.PostId).ToArray();
+                if (excludedIds.Length > 0)
+                    query = query.Where(x => x.Recipe != null || !excludedIds.Contains(x.PostId));
+            }
         }
-        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
-        if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
-        if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
-        if (sort is not null && sort != "rating" && sort != "latest") throw new ServiceException("sort must be rating or latest.", 400);
         query = sort == "rating"
             ? query.OrderByDescending(x => x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating)).ThenByDescending(x => x.Ratings.Count).ThenByDescending(x => x.PostId)
             : query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
