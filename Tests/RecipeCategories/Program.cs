@@ -8,6 +8,18 @@ using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 using System.Text.Json;
 
+if (args.Contains("--database-connectivity") || args.Contains("--verify-live-database"))
+{
+    try { await DatabaseConnectivityTests.RunAsync(args.Contains("--verify-live-database")); }
+    catch (Exception error)
+    {
+        // Never print credentials or a server exception's connection details.
+        Console.Error.WriteLine($"Database connectivity verification failed ({error.GetType().Name}).");
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+
 if (args.Contains("--keyword-allergens"))
 {
     await AllergenKeywordTests.RunAsync();
@@ -47,11 +59,11 @@ if (args.Contains("--birth-year"))
     return;
 }
 
-if (args.Contains("--admin-api") || args.Contains("--location-api") || args.Contains("--avatar-api") || args.Contains("--source-allergens-api"))
+if (args.Contains("--admin-api") || args.Contains("--location-api") || args.Contains("--avatar-api") || args.Contains("--source-allergens-api") || args.Contains("--restaurant-api"))
 {
     try
     {
-        await AdminApiTests.RunAsync(locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"), sourceAllergensOnly: args.Contains("--source-allergens-api"));
+        await AdminApiTests.RunAsync(locationOnly: args.Contains("--location-api"), avatarOnly: args.Contains("--avatar-api"), sourceAllergensOnly: args.Contains("--source-allergens-api"), restaurantOnly: args.Contains("--restaurant-api"));
     }
     catch (Exception error)
     {

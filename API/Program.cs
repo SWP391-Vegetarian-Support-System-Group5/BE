@@ -56,8 +56,11 @@ var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32) throw new InvalidOperationException("JWT signing key is not configured or is too short.");
 
 var mysqlVersion = Version.Parse(builder.Configuration["Database:MySqlVersion"] ?? "8.0.0");
-builder.Services.AddDbContext<VegetarianDbContext>(options => options.UseMySql(
-    connectionString, new MySqlServerVersion(mysqlVersion)));
+connectionString = DatabaseConnectivity.ConfigureConnection(connectionString);
+builder.Services.AddSingleton<DatabaseConnectionInterceptor>();
+builder.Services.AddDbContext<VegetarianDbContext>((services, options) => options.UseMySql(
+    connectionString, new MySqlServerVersion(mysqlVersion))
+    .AddInterceptors(services.GetRequiredService<DatabaseConnectionInterceptor>()));
 builder.Services.AddVegetarianBusinessLogic();
 var sePaySettings = builder.Configuration.GetSection("SePay").Get<SePaySettings>() ?? new SePaySettings();
 builder.Services.AddSingleton(sePaySettings);

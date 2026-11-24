@@ -17,6 +17,13 @@ public class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMi
         {
             logger.LogDebug("The client cancelled the request.");
         }
+        catch (Exception exception) when (DatabaseConnectivity.IsTransientFailure(exception))
+        {
+            logger.LogWarning("Database temporarily unavailable for {Method} {Path}.", context.Request.Method, context.Request.Path);
+            context.Response.Headers.RetryAfter = "5";
+            await WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
+                "Kết nối cơ sở dữ liệu tạm thời gián đoạn. Vui lòng thử lại sau.", []);
+        }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException && !context.RequestAborted.IsCancellationRequested)
         {
             logger.LogWarning(exception, "An external service is temporarily unavailable.");

@@ -50,6 +50,24 @@ public static class VegetarianDietRules
     public static IReadOnlyCollection<string> GetAllowedGroups(string dietTypeName) =>
         AllowedGroupsByDietType.TryGetValue(dietTypeName, out var groups) ? groups : [];
 
+    public static bool IsSupportedDietType(string name) => AllowedGroupsByDietType.ContainsKey(name);
+
+    public static IReadOnlyCollection<string> GetCompatibleRestaurantDietTypes(string userDietTypeName)
+    {
+        if (!AllowedGroupsByDietType.TryGetValue(userDietTypeName, out var allowed)) return [];
+        return AllowedGroupsByDietType.Keys
+            .Where(option => HasCompatibleRestaurantOption([option], allowed)).ToArray();
+    }
+
+    // Each restaurant tag describes an available menu option, not every dish in its kitchen.
+    public static bool HasCompatibleRestaurantOption(IEnumerable<string> restaurantDietTypes, IEnumerable<string> userAllowedGroups)
+    {
+        var allowed = userAllowedGroups.ToHashSet(StringComparer.Ordinal);
+        return restaurantDietTypes.Any(name =>
+            AllowedGroupsByDietType.TryGetValue(name, out var optionGroups)
+            && optionGroups.All(allowed.Contains));
+    }
+
     public static bool IsVerifiedVegetarianRecipe(IEnumerable<string> ingredientGroups) =>
         ingredientGroups.Any() && ingredientGroups.All(group => VegetarianIngredientGroups.Contains(group, StringComparer.Ordinal));
 }
