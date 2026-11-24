@@ -435,6 +435,7 @@ public class VegetarianDbContext(DbContextOptions<VegetarianDbContext> options) 
             entity.Property(x => x.Reason).HasMaxLength(500);
             entity.Property(x => x.Status).HasMaxLength(20).IsUnicode(false).IsRequired();
             entity.HasOne(x => x.Post).WithMany(x => x.ModerationFlags).HasForeignKey(x => x.PostId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(x => x.Status).IsConcurrencyToken();
             entity.HasOne(x => x.Comment).WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Reporter).WithMany().HasForeignKey(x => x.ReportedBy).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(x => x.Reviewer).WithMany().HasForeignKey(x => x.ReviewedBy).OnDelete(DeleteBehavior.NoAction);

@@ -19,19 +19,52 @@ public class ModerationService(IRepository<ModerationFlag> flags, IRepository<Po
         if (flag.Status != "PENDING") throw new ServiceException("Moderation flag was already reviewed.", 409);
         flag.ReviewedBy = adminId;
         flag.Status = removeContent ? "REMOVED" : "APPROVED";
-        var post = removeContent && flag.PostId.HasValue ? await posts.FindAsync(flag.PostId.Value) : null;
-        var comment = removeContent && flag.CommentId.HasValue ? await comments.FindAsync(flag.CommentId.Value) : null;
-        if (post?.Status == "REMOVED") post = null;
-        if (comment?.Status == "REMOVED") comment = null;
-        if (post is not null) { post.Status = "REMOVED"; post.UpdatedAt = VietnamTime.Now; }
-        if (comment is not null) { comment.Status = "REMOVED"; comment.UpdatedAt = VietnamTime.Now; }
-        await flags.SaveChangesAsync(cancellationToken);
-        if (post is not null)
+        if (flag.Source == "AI")
+        {
+            var duplicateFlags = await flags.Query().Where(x => x.FlagId != id && x.Source == "AI" && x.Status == "PENDING"
+                && x.PostId == flag.PostId && x.CommentId == flag.CommentId).ToListAsync(cancellationToken);
+            foreach (var duplicate in duplicateFlags)
+            {
+                duplicate.Status = flag.Status;
+                duplicate.ReviewedBy = adminId;
+            }
+        }
+
+        var post = flag.PostId.HasValue ? await posts.FindAsync(flag.PostId.Value) : null;
+        var comment = flag.CommentId.HasValue
+            ? await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).SingleOrDefaultAsync(x => x.CommentId == flag.CommentId, cancellationToken)
+            : null;
+        var changePost = post is not null && (removeContent ? post.Status != "REMOVED" : flag.Source == "AI" && (post.Status is "DRAFT" or "PENDING_REVIEW"));
+        var changeComment = comment is not null && (removeContent ? comment.Status != "REMOVED" : flag.Source == "AI" && comment.Status == "PENDING_REVIEW");
+        if (changePost) { post!.Status = removeContent ? "REMOVED" : "PUBLISHED"; post.UpdatedAt = VietnamTime.Now; }
+        if (changeComment) { comment!.Status = removeContent ? "REMOVED" : "PUBLISHED"; comment.UpdatedAt = VietnamTime.Now; }
+        try
+        {
+            await flags.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ServiceException("Moderation flag changed. Reload it before reviewing.", 409);
+        }
+
+        if (!removeContent)
+        {
+            if (changePost && post is not null)
+                await events.PublishAsync(new CommunityEvent("postCreated", post.PostId), cancellationToken);
+            if (changeComment && comment is not null)
+            {
+                var count = await comments.Query().CountAsync(x => x.PostId == comment.PostId && x.Status == "PUBLISHED", cancellationToken);
+                await events.PublishAsync(new CommunityEvent("commentCreated", comment.PostId,
+                    Comment: PostService.ToCommentResponse(comment, []), CommentCount: count), cancellationToken);
+            }
+            return;
+        }
+        if (changePost && post is not null)
         {
             await events.PublishAsync(new CommunityEvent("postRemoved", post.PostId), cancellationToken);
             if (post.UserId != adminId) await notifications.CreateAsync(post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", post.PostId, cancellationToken);
         }
-        if (comment is not null)
+        if (changeComment && comment is not null)
         {
             await events.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId), cancellationToken);
             if (comment.UserId != adminId) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên gỡ.", comment.PostId, cancellationToken);
