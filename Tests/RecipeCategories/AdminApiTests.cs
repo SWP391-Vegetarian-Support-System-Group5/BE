@@ -256,6 +256,7 @@ static class AdminApiTests
             var post = await Send("POST", "/api/posts", 201, new {title="Test post",content="Test content",postType="BLOG"}, user);
             var postId = post.GetProperty("postId").GetInt32();
             if (post.GetProperty("compatibleDietTypes").GetArrayLength() != 0) throw new Exception("A plain post must not claim a vegetarian type");
+            await Send("POST", $"/api/admin/posts/{postId}/approve", 204, token: admin);
             var comment = await Send("POST", $"/api/posts/{postId}/comments", 201, new {content="Test comment"}, user);
             var commentId = comment.GetProperty("commentId").GetInt32();
             await Send("PUT", $"/api/admin/comments/{commentId}/visibility", 204, new { hidden=true }, admin);
@@ -276,6 +277,19 @@ static class AdminApiTests
             var comments = await Send("GET", "/api/admin/comments", 200, token: admin);
             if (comments[0].GetProperty("status").GetString() != "REMOVED") throw new Exception("Moderation did not remove comment");
             await Send("POST", $"/api/admin/moderation/{reportId}/remove", 409, token: admin);
+            var flaggedComment = await Send("POST", $"/api/posts/{postId}/comments", 201, new { content = "spam" }, user);
+            var flaggedCommentId = flaggedComment.GetProperty("commentId").GetInt32();
+            if (flaggedComment.GetProperty("status").GetString() != "PENDING_REVIEW") throw new Exception("AI-flagged comment must wait for review");
+            var pendingComments = await Send("GET", $"/api/posts/{postId}/comments", 200);
+            if (pendingComments.GetArrayLength() != 0) throw new Exception("AI-flagged comment became public before approval");
+            var flags = await Send("GET", "/api/admin/moderation", 200, token: admin);
+            var aiFlagId = flags.EnumerateArray().Single(x => x.GetProperty("commentId").ValueKind == JsonValueKind.Number
+                && x.GetProperty("commentId").GetInt32() == flaggedCommentId).GetProperty("flagId").GetInt32();
+            await Send("POST", $"/api/admin/moderation/{aiFlagId}/approve", 204, token: admin);
+            await Send("POST", $"/api/admin/moderation/{aiFlagId}/remove", 409, token: admin);
+            var publicComments = await Send("GET", $"/api/posts/{postId}/comments", 200);
+            if (publicComments[0].GetProperty("commentId").GetInt32() != flaggedCommentId
+                || publicComments[0].GetProperty("status").GetString() != "PUBLISHED") throw new Exception("Approved comment did not stay public");
             await Send("DELETE", $"/api/admin/comments/{commentId}", 204, token: admin);
             await Send("DELETE", $"/api/admin/posts/{postId}", 204, token: admin);
             await Send("GET", $"/api/posts/{postId}", 404);
@@ -283,6 +297,38 @@ static class AdminApiTests
             await Send("DELETE", "/api/admin/comments/9999", 404, token: admin);
             await Send("POST", "/api/admin/moderation/9999/approve", 404, token: admin);
             await Send("POST", "/api/admin/moderation/9999/remove", 404, token: admin);
+
+            var flaggedRecipeRequest = new
+            {
+                title = "AI moderation test", content = "spam", recipeName = "Tofu dish",
+                ingredients = new[] { new { ingredientName = "Test tofu", amount = "100g", dietaryGroup = "PLANT" } },
+                steps = new[] { new { stepNumber = 1, instruction = "Cook" } }
+            };
+            var flaggedRecipe = await Send("POST", "/api/recipes", 201, flaggedRecipeRequest, user);
+            var flaggedRecipeId = flaggedRecipe.GetProperty("postId").GetInt32();
+            var recipeFlags = await Send("GET", "/api/admin/moderation", 200, token: admin);
+            var recipeFlagId = recipeFlags.EnumerateArray().Single(x => x.GetProperty("postId").ValueKind == JsonValueKind.Number
+                && x.GetProperty("postId").GetInt32() == flaggedRecipeId).GetProperty("flagId").GetInt32();
+            await Send("PUT", $"/api/recipes/{flaggedRecipeId}", 204, flaggedRecipeRequest, user);
+            int duplicateFlagId;
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                var duplicate = new ModerationFlag { PostId = flaggedRecipeId, Source = "AI", Status = "PENDING", Reason = "Older duplicate flag" };
+                db.ModerationFlags.Add(duplicate);
+                await db.SaveChangesAsync();
+                duplicateFlagId = duplicate.FlagId;
+            }
+            await Send("POST", $"/api/admin/moderation/{recipeFlagId}/approve", 204, token: admin);
+            await Send("POST", $"/api/admin/moderation/{duplicateFlagId}/remove", 409, token: admin);
+            await Send("PUT", $"/api/recipes/{flaggedRecipeId}", 204, flaggedRecipeRequest, user);
+            var reviewedRecipeFlags = await Send("GET", "/api/admin/moderation", 200, token: admin);
+            var matchingFlags = reviewedRecipeFlags.EnumerateArray().Where(x => x.GetProperty("postId").ValueKind == JsonValueKind.Number
+                && x.GetProperty("postId").GetInt32() == flaggedRecipeId).ToArray();
+            if (matchingFlags.Length != 2 || matchingFlags.Any(x => x.GetProperty("status").GetString() != "APPROVED"))
+                throw new Exception("Recipe approval must resolve both existing flags without creating another");
+            var publicRecipe = await Send("GET", $"/api/recipes/{flaggedRecipeId}", 200);
+            if (publicRecipe.GetProperty("status").GetString() != "PUBLISHED") throw new Exception("Approved recipe did not stay public");
 
             var ingredientCategories = await Send("GET", "/api/ingredient-categories", 200, token: admin);
             var plantId = ingredientCategories.EnumerateArray().First(x=>x.GetProperty("code").GetString()=="PLANT").GetProperty("id").GetInt32();
