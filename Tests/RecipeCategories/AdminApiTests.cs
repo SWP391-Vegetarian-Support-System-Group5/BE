@@ -332,7 +332,12 @@ static class AdminApiTests
             await Send("POST", $"/api/admin/moderation/{reportId}/approve", 204, token: admin);
             var approved = await Send("GET", $"/api/admin/moderation/{reportId}", 200, token: admin);
             if (approved.GetProperty("status").GetString() != "APPROVED") throw new Exception("Approve did not persist");
-            var commentReport = await Send("POST", $"/api/reports/comments/{commentId}", 201, new {reason="Test comment report"}, user);
+            await Send("POST", $"/api/reports/comments/{commentId}", 403, new {reason="Self-report"}, user);
+            var commentReport = await Send("POST", $"/api/reports/comments/{commentId}", 201, new {reason="Test comment report"}, admin);
+            var reportedComments = await Send("GET", $"/api/posts/{postId}/comments", 200);
+            if (commentReport.GetProperty("source").GetString() != "USER_REPORT"
+                || reportedComments.EnumerateArray().Single().GetProperty("status").GetString() != "PUBLISHED")
+                throw new Exception("A user report must leave the comment public until review");
             await Send("POST", $"/api/admin/moderation/{commentReport.GetProperty("flagId").GetInt32()}/remove", 204, token: admin);
             var comments = await Send("GET", "/api/admin/comments", 200, token: admin);
             if (comments[0].GetProperty("status").GetString() != "REMOVED") throw new Exception("Moderation did not remove comment");
@@ -348,18 +353,44 @@ static class AdminApiTests
             var publicComments = await Send("GET", $"/api/posts/{postId}/comments", 200);
             if (publicComments[0].GetProperty("commentId").GetInt32() != flaggedCommentId
                 || publicComments[0].GetProperty("status").GetString() != "PUBLISHED") throw new Exception("Approved comment did not stay public");
+            var reply = await Send("POST", $"/api/comments/{flaggedCommentId}/replies", 201, new { content = "Test reply" }, user);
+            var replyId = reply.GetProperty("commentId").GetInt32();
+            var flaggedReply = await Send("POST", $"/api/comments/{flaggedCommentId}/replies", 201, new { content = "spam" }, user);
+            if (flaggedReply.GetProperty("status").GetString() != "PENDING_REVIEW"
+                || (await Send("GET", $"/api/posts/{postId}/comments", 200))[0].GetProperty("replies").GetArrayLength() != 1)
+                throw new Exception("AI-flagged replies must stay out of the public thread");
             await Send("POST", $"/api/admin/moderation/{aiFlagId}/remove", 204, token: admin);
             await Send("POST", $"/api/admin/moderation/{aiFlagId}/remove", 204, token: admin);
+            var remainingThread = await Send("GET", $"/api/posts/{postId}/comments", 200);
+            var placeholder = remainingThread.EnumerateArray().Single();
+            var publicReply = placeholder.GetProperty("replies").EnumerateArray().Single();
+            if (placeholder.GetProperty("commentId").GetInt32() != flaggedCommentId
+                || placeholder.GetProperty("status").GetString() != "REMOVED"
+                || placeholder.GetProperty("content").GetString() != ""
+                || placeholder.GetProperty("authorName").GetString() != ""
+                || publicReply.GetProperty("commentId").GetInt32() != replyId
+                || publicReply.GetProperty("status").GetString() != "PUBLISHED")
+                throw new Exception("A removed comment must preserve public replies without exposing its own content");
+            await Send("POST", $"/api/comments/{flaggedCommentId}/replies", 404, new { content = "Test reply" }, user);
+            await Send("DELETE", $"/api/admin/comments/{replyId}", 204, token: admin);
             if ((await Send("GET", $"/api/posts/{postId}/comments", 200)).GetArrayLength() != 0)
-                throw new Exception("Removing an approved comment must take it off the public feed");
+                throw new Exception("A removed comment without public descendants must disappear from the public feed");
 
             var secondComment = await Send("POST", $"/api/posts/{postId}/comments", 201, new { content = "spam" }, user);
             var secondCommentId = secondComment.GetProperty("commentId").GetInt32();
             var secondFlags = await Send("GET", "/api/admin/moderation", 200, token: admin);
             var secondAiFlagId = secondFlags.EnumerateArray().Single(x => x.GetProperty("commentId").ValueKind == JsonValueKind.Number
                 && x.GetProperty("commentId").GetInt32() == secondCommentId).GetProperty("flagId").GetInt32();
-            var secondReport = await Send("POST", $"/api/reports/comments/{secondCommentId}", 201, new { reason = "Test comment report" }, user);
-            var secondReportId = secondReport.GetProperty("flagId").GetInt32();
+            await Send("POST", $"/api/reports/comments/{secondCommentId}", 409, new { reason = "Pending comment report" }, admin);
+            int secondReportId;
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                var legacyReport = new ModerationFlag { CommentId = secondCommentId, Source = "USER_REPORT", Status = "PENDING", Reason = "Legacy report" };
+                db.ModerationFlags.Add(legacyReport);
+                await db.SaveChangesAsync();
+                secondReportId = legacyReport.FlagId;
+            }
             await Send("POST", $"/api/admin/moderation/{secondReportId}/remove", 204, token: admin);
             await Send("POST", $"/api/admin/moderation/{secondAiFlagId}/approve", 409, token: admin);
             var removedAiFlag = await Send("GET", $"/api/admin/moderation/{secondAiFlagId}", 200, token: admin);

@@ -160,8 +160,11 @@ public class PostService(
     public async Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default)
     {
         if (!await posts.Query().AnyAsync(x => x.PostId == postId && x.Status == "PUBLISHED", cancellationToken)) throw new ServiceException("Post was not found.", 404);
-        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).Where(x => x.PostId == postId && x.Status == "PUBLISHED").OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
-        return items.Where(x => x.ParentCommentId is null).Select(x => ToCommentTree(x, items)).ToList();
+        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
+            .Where(x => x.PostId == postId && (x.Status == "PUBLISHED" || x.Status == "REMOVED"))
+            .OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
+        var byParent = items.ToLookup(x => x.ParentCommentId);
+        return byParent[null].Select(x => ToCommentTree(x, byParent)).OfType<CommentResponse>().ToList();
     }
 
     public async Task<IReadOnlyCollection<CommentResponse>> GetAllCommentsAsync(CancellationToken cancellationToken = default)
@@ -187,7 +190,7 @@ public class PostService(
         if (comment.Status == "REMOVED") return;
         comment.Status = "REMOVED"; comment.UpdatedAt = VietnamTime.Now; await comments.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
+        await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToRemovedCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
         if (role == "ADMIN" && comment.UserId != actorId) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên gỡ.", comment.PostId, cancellationToken);
     }
 
@@ -273,7 +276,16 @@ public class PostService(
         actorId == x.UserId ? x.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null,
         x.Recipe?.ImageUrl,
         x.Recipe?.CaloriesPerServing);
-    private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
+    private static CommentResponse? ToCommentTree(Comment comment, ILookup<int?, Comment> byParent)
+    {
+        var replies = byParent[comment.CommentId].Select(x => ToCommentTree(x, byParent)).OfType<CommentResponse>().ToList();
+        if (comment.Status != "REMOVED") return ToCommentResponse(comment, replies);
+        if (replies.Count == 0) return null;
+        return ToRemovedCommentResponse(comment, replies);
+    }
+    private static CommentResponse ToRemovedCommentResponse(Comment comment, IReadOnlyCollection<CommentResponse> replies) =>
+        new(comment.CommentId, comment.PostId, 0, string.Empty, comment.ParentCommentId,
+            string.Empty, comment.Status, replies, comment.CreatedAt, comment.UpdatedAt);
     internal static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies, x.CreatedAt, x.UpdatedAt);
     private async Task<int> CountPublishedCommentsAsync(int postId, CancellationToken ct) => await comments.Query().CountAsync(x => x.PostId == postId && x.Status == "PUBLISHED", ct);
     private async Task<CommentResponse> GetCommentResponseAsync(int id, CancellationToken ct)
