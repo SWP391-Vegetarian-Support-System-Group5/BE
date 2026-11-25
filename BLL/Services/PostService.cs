@@ -78,10 +78,10 @@ public class PostService(
 
     public async Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         if (post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var wasPublished = post.Status == "PUBLISHED";
         var videoUrl = request.VideoUrl?.Trim();
         post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); post.UpdatedAt = VietnamTime.Now;
@@ -95,6 +95,7 @@ public class PostService(
 
     public async Task ReviewManualPostAsync(int id, int adminId, bool approve, string? rejectionReason, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         if (post.Status != "PENDING_REVIEW") throw new ServiceException("Only posts pending review can be reviewed.", 409);
         if (!approve && string.IsNullOrWhiteSpace(rejectionReason)) throw new ServiceException("A rejection reason is required.", 400);
@@ -103,6 +104,7 @@ public class PostService(
         if (!approve)
             await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "ADMIN_REVIEW", Reason = rejectionReason!.Trim(), Status = "REJECTED", ReviewedBy = adminId }, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         if (approve)
         {
             await communityEvents.PublishAsync(new CommunityEvent("postCreated", id, Post: await GetByIdAsync(id, adminId, "ADMIN", cancellationToken)), cancellationToken);
@@ -113,10 +115,12 @@ public class PostService(
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         if (post.Status == "REMOVED") return;
         post.Status = "REMOVED"; post.UpdatedAt = VietnamTime.Now; await posts.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
         if (role == "ADMIN" && post.UserId != actorId) await notifications.CreateAsync(post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", id, cancellationToken);
     }
@@ -176,17 +180,20 @@ public class PostService(
 
     public async Task DeleteCommentAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, null, id, cancellationToken);
         var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
             .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
         EnsureOwner(comment.UserId, actorId, role);
         if (comment.Status == "REMOVED") return;
         comment.Status = "REMOVED"; comment.UpdatedAt = VietnamTime.Now; await comments.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
         if (role == "ADMIN" && comment.UserId != actorId) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên gỡ.", comment.PostId, cancellationToken);
     }
 
     public async Task SetCommentVisibilityAsync(int id, bool hidden, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, null, id, cancellationToken);
         var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
             .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
         if (comment.Status == "REMOVED") throw new ServiceException("Removed comments cannot change visibility.", 409);
@@ -195,6 +202,7 @@ public class PostService(
         comment.Status = hidden ? "HIDDEN" : "PUBLISHED";
         comment.UpdatedAt = VietnamTime.Now;
         await comments.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent(hidden ? "commentRemoved" : "commentUpdated", comment.PostId,
             Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
         if (hidden) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên ẩn.", comment.PostId, cancellationToken);

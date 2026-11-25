@@ -59,6 +59,7 @@ public class RecipeService(
     {
         ValidateRecipeRequest(request);
         var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
@@ -75,7 +76,6 @@ public class RecipeService(
             ? null
             : await moderationAiService.FlagRecipeReasonAsync(ModerationText(request), request.AnimalDerivedIngredientsConfirmed, cancellationToken);
         var wasPublished = recipe.Post.Status == "PUBLISHED";
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
         recipe.Post.Status = requiresAdminReview ? "PENDING_REVIEW" : moderationReason is not null || keepPendingReview ? "DRAFT" : "PUBLISHED";
@@ -102,10 +102,12 @@ public class RecipeService(
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") return;
         recipe.Post.Status = "REMOVED"; recipe.Post.UpdatedAt = VietnamTime.Now; await recipes.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
         if (role == "ADMIN" && recipe.Post.UserId != actorId && notifications is not null)
             await notifications.CreateAsync(recipe.Post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", id, cancellationToken);
