@@ -94,7 +94,10 @@ public class ModerationService(IRepository<ModerationFlag> flags, IRepository<Po
         if (commentId.HasValue)
         {
             var comment = await comments.FindAsync(commentId.Value) ?? throw new ServiceException("Comment was not found.", 404);
-            if (comment.Status == "REMOVED") throw new ServiceException("Removed content cannot be reported.", 409);
+            if (comment.UserId == userId) throw new ServiceException("You cannot report your own comment.", 403);
+            if (comment.Status != "PUBLISHED" || !await posts.Query().AnyAsync(
+                x => x.PostId == comment.PostId && x.Status == "PUBLISHED", ct))
+                throw new ServiceException("Only published comments can be reported.", 409);
         }
         var flag = new ModerationFlag { PostId = postId, CommentId = commentId, Source = "USER_REPORT", ReportedBy = userId, Reason = request.Reason.Trim(), Status = "PENDING" };
         await flags.AddAsync(flag, ct);
