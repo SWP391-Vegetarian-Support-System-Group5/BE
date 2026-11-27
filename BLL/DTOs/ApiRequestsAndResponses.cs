@@ -38,7 +38,7 @@ public record UpdateUserStatusRequest(bool IsActive);
 public record UpdateUserAllergensRequest([Required] List<int> AllergenIds);
 public record ReviewPostRequest([Required, MaxLength(1000)] string Reason);
 public record UserAllergensResponse(int UserId, IReadOnlyCollection<CatalogItemResponse> Allergens);
-public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups);
+public record DietTypeResponse(int Id, string Name, IReadOnlyCollection<string> AllowedIngredientGroups, IReadOnlyCollection<string> ProhibitedIngredientGroups, IReadOnlyCollection<int>? CompatibleRestaurantDietTypeIds = null);
 public record AllergenRequest([Required, MaxLength(150)] string Name);
 public record CatalogItemResponse(int Id, string Name, string? Type = null);
 public record ProvinceResponse(string Code, string Name, string Type, decimal? Latitude, decimal? Longitude);

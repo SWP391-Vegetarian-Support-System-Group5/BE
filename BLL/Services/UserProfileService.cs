@@ -15,8 +15,10 @@ public class UserProfileService(IRepository<UserProfile> profiles, IRepository<D
 
         var profile = await profiles.Query().Include(x => x.User).SingleOrDefaultAsync(x => x.UserId == userId, cancellationToken)
             ?? throw new ServiceException("User profile was not found.", 404);
-        if (!await dietTypes.Query().AnyAsync(x => x.DietTypeId == request.DietTypeId, cancellationToken))
-            throw new ServiceException("Diet type was not found.", 404);
+        var selectedDiet = await dietTypes.Query().AsNoTracking().SingleOrDefaultAsync(x => x.DietTypeId == request.DietTypeId, cancellationToken)
+            ?? throw new ServiceException("Diet type was not found.", 404);
+        if (!VegetarianDietRules.IsSupportedDietType(selectedDiet.Name))
+            throw new ServiceException("Diet type is not supported by the profile and restaurant matching rules.", 400);
         if (NutritionProfileRules.Age(request.BirthYear, DateTime.UtcNow) is null)
             throw new ServiceException("Birth year must correspond to an age between 18 and 120.", 400);
 

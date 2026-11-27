@@ -25,7 +25,7 @@ using Microsoft.IdentityModel.Tokens;
 static class AdminApiTests
 {
     // Real HTTP/controllers/services/JWT, isolated storage; never reads Aiven credentials.
-    public static async Task RunAsync(bool locationOnly = false, bool avatarOnly = false, bool sourceAllergensOnly = false)
+    public static async Task RunAsync(bool locationOnly = false, bool avatarOnly = false, bool sourceAllergensOnly = false, bool restaurantOnly = false)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development, Args = [] });
         builder.Logging.ClearProviders();
@@ -287,7 +287,8 @@ static class AdminApiTests
             if (updatedRestaurant.GetProperty("ingredientIds")[0].GetInt32() != mushroomId) throw new Exception("Restaurant ingredients were not saved");
             if (updatedRestaurant.GetProperty("dietTypeIds").GetArrayLength()!=1) throw new Exception("Restaurant diet type replacement did not remove the previous type");
             var removedDietNearby = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={secondDietId}", 200, token: user);
-            if (removedDietNearby.GetArrayLength()!=0) throw new Exception("Removed diet type still matched nearby restaurant");
+            if (!removedDietNearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == restaurantId))
+                throw new Exception("Lacto users must still see a restaurant with vegan options after its lacto tag is removed");
             var withMushroom = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={dietId}&ingredient=Mushroom", 200, token: user);
             if (!withMushroom.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == restaurantId)) throw new Exception("Restaurant ingredient filter omitted a matching restaurant");
             var withoutMushroom = await Send("GET", $"/api/restaurants/nearby?latitude=11&longitude=107&radius=5&dietTypeId={dietId}&ingredient=Tofu", 200, token: user);
@@ -299,8 +300,150 @@ static class AdminApiTests
             await Send("POST", "/api/admin/restaurants", 400, new {name="External image",address="Test address",dietTypeIds=new[]{dietId},imageUrl="https://example.com/photo.jpg"}, admin);
             await Send("PUT", $"/api/admin/restaurants/{restaurantId}", 404, new {name="Changed kitchen",address="Changed address",dietTypeIds=new[]{9999}}, admin);
             await Send("GET", "/api/restaurants?food=Soup", 200, token: admin);
+
+            // A restaurant can offer vegan dishes alongside dairy/egg dishes.
+            var lactoOvoId = diets.EnumerateArray().First(x => x.GetProperty("name").GetString() == "LACTO_OVO_VEGETARIAN").GetProperty("id").GetInt32();
+            int milkId, eggId;
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                var profile = await db.UserProfiles.SingleAsync(x => x.UserId == 2);
+                profile.DietTypeId = dietId;
+                var dairyCategory = await db.IngredientCategories.SingleAsync(x => x.Code == "DAIRY");
+                var eggCategory = new IngredientCategory { Code = "EGG", Name = "Egg", DietaryGroup = "EGG" };
+                var milk = new Ingredient { Name = "Restaurant milk", Category = dairyCategory };
+                var egg = new Ingredient { Name = "Restaurant egg", Category = eggCategory };
+                db.Ingredients.AddRange(milk, egg);
+                await db.SaveChangesAsync();
+                milkId = milk.IngredientId;
+                eggId = egg.IngredientId;
+            }
+            var mixed = await Send("POST", "/api/admin/restaurants", 201, new {
+                name = "Mixed menu", address = "Test address", dietTypeIds = new[] { dietId, lactoOvoId },
+                foods = new[] { "Vegan tofu", "Milk and egg dish" }, ingredientIds = new[] { milkId, eggId }
+            }, admin);
+            var mixedId = mixed.GetProperty("restaurantId").GetInt32();
+            if (mixed.GetProperty("dietTypeIds").GetArrayLength() != 2) throw new Exception("Mixed-menu restaurant lost an option tag");
+            var veganNearby = await Send("GET", "/api/restaurants/nearby?latitude=10&longitude=106&radius=5", 200, token: user);
+            if (!veganNearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == mixedId))
+                throw new Exception("Vegan profile must see a mixed restaurant with vegan options, even when its ingredient list includes milk and egg");
+            await Send("PUT", $"/api/admin/restaurants/{mixedId}", 204, new {
+                name = "Mixed menu", address = "Test address", dietTypeIds = new[] { lactoOvoId }, ingredientIds = new[] { milkId, eggId }
+            }, admin);
+            var dairyOnlyNearby = await Send("GET", "/api/restaurants/nearby?latitude=10&longitude=106&radius=5", 200, token: user);
+            if (dairyOnlyNearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == mixedId))
+                throw new Exception("Vegan profile must not match a restaurant without a vegan option tag");
+            await Send("PUT", $"/api/admin/restaurants/{mixedId}", 204, new {
+                name = "Mixed menu", address = "Test address", dietTypeIds = new[] { dietId, lactoOvoId }, ingredientIds = new[] { milkId, eggId }
+            }, admin);
+            var restoredNearby = await Send("GET", "/api/restaurants/nearby?latitude=10&longitude=106&radius=5", 200, token: user);
+            if (!restoredNearby.EnumerateArray().Any(x => x.GetProperty("restaurantId").GetInt32() == mixedId))
+                throw new Exception("Adding the vegan option tag must restore restaurant visibility");
+            if (VegetarianDietRules.HasCompatibleRestaurantOption(new[] { "UNKNOWN" }, VegetarianDietRules.GetAllowedGroups("VEGAN")))
+                throw new Exception("Unknown restaurant tags must not match a vegan profile");
+            if (VegetarianDietRules.GetCompatibleDietTypes(new[] { "PLANT", "DAIRY", "EGG" }).Contains("VEGAN"))
+                throw new Exception("Restaurant option matching must not make dairy/egg recipes vegan");
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                (await db.UserProfiles.SingleAsync(x => x.UserId == 2)).DietTypeId = null;
+                await db.SaveChangesAsync();
+            }
+            await Send("DELETE", $"/api/admin/restaurants/{mixedId}", 204, token: admin);
             await Send("DELETE", $"/api/admin/restaurants/{restaurantId}", 204, token: admin);
             await Send("GET", $"/api/restaurants/{restaurantId}", 404, token: admin);
+
+            var restaurantByTag = new Dictionary<string, int>();
+            var dietIdByName = diets.EnumerateArray().ToDictionary(x => x.GetProperty("name").GetString()!, x => x.GetProperty("id").GetInt32());
+            foreach (var (name, id) in dietIdByName)
+            {
+                var tagged = await Send("POST", "/api/admin/restaurants", 201, new {
+                    name = $"Option {name}", address = "Test address", dietTypeIds = new[] { id }
+                }, admin);
+                restaurantByTag[name] = tagged.GetProperty("restaurantId").GetInt32();
+            }
+            // Independent expected results: rows are user diets, columns are restaurant options.
+            var expectedOptions = new Dictionary<string, string[]> {
+                ["VEGAN"] = ["VEGAN"],
+                ["LACTO_VEGETARIAN"] = ["VEGAN", "LACTO_VEGETARIAN"],
+                ["OVO_VEGETARIAN"] = ["VEGAN", "OVO_VEGETARIAN"],
+                ["LACTO_OVO_VEGETARIAN"] = ["VEGAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN", "VEGETARIAN"],
+                ["VEGETARIAN"] = ["VEGAN", "LACTO_VEGETARIAN", "OVO_VEGETARIAN", "LACTO_OVO_VEGETARIAN", "VEGETARIAN"]
+            };
+            foreach (var useSavedProfile in new[] { true, false })
+            foreach (var (userDiet, expectedTags) in expectedOptions)
+            {
+                if (useSavedProfile)
+                {
+                    var saved = await Send("PUT", "/api/users/me/profile", 200, ProfileFor(dietIdByName[userDiet]), user);
+                    if (saved.GetProperty("dietTypeId").GetInt32() != dietIdByName[userDiet]) throw new Exception("Profile PUT did not return its saved diet");
+                    var reloaded = await Send("GET", "/api/users/me", 200, token: user);
+                    if (reloaded.GetProperty("dietTypeId").GetInt32() != dietIdByName[userDiet]) throw new Exception("Profile diet did not survive a fresh HTTP request");
+                }
+                else using (var scope = app.Services.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                    (await db.UserProfiles.SingleAsync(x => x.UserId == 2)).DietTypeId = null;
+                    await db.SaveChangesAsync();
+                }
+                var selectedFilter = useSavedProfile ? "" : $"&dietTypeId={dietIdByName[userDiet]}";
+                var matches = await Send("GET", $"/api/restaurants/nearby?latitude=10&longitude=106&radius=5{selectedFilter}", 200, token: user);
+                var actualIds = matches.EnumerateArray().Select(x => x.GetProperty("restaurantId").GetInt32()).ToHashSet();
+                foreach (var (tag, id) in restaurantByTag)
+                    if (actualIds.Contains(id) != expectedTags.Contains(tag))
+                        throw new Exception($"Diet option mismatch: user={userDiet}, restaurant={tag}, savedProfile={useSavedProfile}");
+            }
+            object ProfileFor(int id) => new {
+                fullName = "Diet profile test", sex = "MALE", birthYear = 1995, heightCm = 170m,
+                weightKg = 65m, activityLevel = "MODERATE", dietTypeId = id, latitude = 10m, longitude = 106m,
+                livingAddress = "Test address", goalWeightKg = 65m
+            };
+            foreach (var diet in diets.EnumerateArray())
+            {
+                var name = diet.GetProperty("name").GetString()!;
+                var expectedIds = expectedOptions[name].Select(option => dietIdByName[option]).ToHashSet();
+                var advertisedIds = diet.GetProperty("compatibleRestaurantDietTypeIds").EnumerateArray().Select(x => x.GetInt32()).ToHashSet();
+                if (!advertisedIds.SetEquals(expectedIds)) throw new Exception($"Catalog compatibility does not match the matrix for {name}");
+            }
+            await Send("PUT", "/api/users/me/profile", 200, ProfileFor(dietId), user);
+            // Query parameters cannot loosen the actual saved profile.
+            var protectedMatches = await Send("GET", $"/api/restaurants/nearby?latitude=10&longitude=106&radius=5&dietTypeId={lactoOvoId}", 200, token: user);
+            if (!protectedMatches.EnumerateArray().Select(x => x.GetProperty("restaurantId").GetInt32()).ToHashSet().SetEquals(new[] { restaurantByTag["VEGAN"] }))
+                throw new Exception("Query diet must not override the saved vegan profile");
+            await Send("PUT", "/api/users/me/profile", 404, ProfileFor(int.MaxValue), user);
+            await Send("PUT", "/api/users/me/profile", 400, ProfileFor(0), user);
+            int unsupportedDietId;
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                var unsupported = new DietType { Name = "UNSUPPORTED_TEST_DIET" };
+                db.DietTypes.Add(unsupported);
+                await db.SaveChangesAsync();
+                unsupportedDietId = unsupported.DietTypeId;
+            }
+            await Send("PUT", "/api/users/me/profile", 400, ProfileFor(unsupportedDietId), user);
+            await Send("POST", "/api/admin/restaurants", 400, new {name="Unsupported",address="Test address",dietTypeIds=new[]{unsupportedDietId}}, admin);
+            await Send("PUT", $"/api/admin/restaurants/{restaurantByTag["VEGAN"]}", 400, new {name="Unsupported",address="Test address",dietTypeIds=new[]{unsupportedDietId}}, admin);
+            var unchangedProfile = await Send("GET", "/api/users/me", 200, token: user);
+            if (unchangedProfile.GetProperty("dietTypeId").GetInt32() != dietId) throw new Exception("Invalid diet requests changed the saved profile");
+            var unchangedRestaurant = await Send("GET", $"/api/restaurants/{restaurantByTag["VEGAN"]}", 200, token: admin);
+            if (unchangedRestaurant.GetProperty("dietTypeIds").EnumerateArray().Single().GetInt32() != dietId) throw new Exception("Invalid tags changed the saved restaurant");
+            var supportedCatalog = await Send("GET", "/api/diet-types", 200, token: user);
+            if (supportedCatalog.EnumerateArray().Any(x => x.GetProperty("id").GetInt32() == unsupportedDietId)) throw new Exception("Unsupported tag leaked into profile/admin setup options");
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<VegetarianDbContext>();
+                (await db.UserProfiles.SingleAsync(x => x.UserId == 2)).DietTypeId = null;
+                await db.SaveChangesAsync();
+            }
+            foreach (var id in restaurantByTag.Values)
+                await Send("DELETE", $"/api/admin/restaurants/{id}", 204, token: admin);
+            Console.WriteLine("PASS 50 restaurant compatibility expectations (saved profile and selected filter), mixed-menu create/update, and recipe diet isolation.");
+            if (restaurantOnly)
+            {
+                Console.WriteLine($"PASS restaurant API checks: {checks}; isolated storage only.");
+                return;
+            }
 
             var category = await Send("POST", "/api/recipe-categories", 201, new {name="Test category",isActive=true}, admin);
             var categoryId = category.GetProperty("id").GetInt32();

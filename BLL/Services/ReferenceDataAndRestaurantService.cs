@@ -18,10 +18,17 @@ public class ReferenceDataAndRestaurantService(
     IRepository<Ingredient> ingredients,
     VegetarianDbContext db) : IReferenceDataAndRestaurantService
 {
-    public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default) =>
-        (await dietTypes.Query().OrderBy(x => x.Name).ToListAsync(cancellationToken))
-            .Select(x => new DietTypeResponse(x.DietTypeId, x.Name, VegetarianDietRules.GetAllowedGroups(x.Name), VegetarianDietRules.ProhibitedNonVegetarianGroups.Concat(VegetarianDietRules.SupportedIngredientGroups.Except(VegetarianDietRules.GetAllowedGroups(x.Name))).ToArray()))
-            .ToList();
+    public async Task<IReadOnlyCollection<DietTypeResponse>> GetDietTypesAsync(CancellationToken cancellationToken = default)
+    {
+        var catalog = (await dietTypes.Query().AsNoTracking().OrderBy(x => x.Name).ToListAsync(cancellationToken))
+            .Where(x => VegetarianDietRules.IsSupportedDietType(x.Name)).ToArray();
+        return catalog.Select(x => {
+            var compatibleNames = VegetarianDietRules.GetCompatibleRestaurantDietTypes(x.Name);
+            return new DietTypeResponse(x.DietTypeId, x.Name, VegetarianDietRules.GetAllowedGroups(x.Name),
+                VegetarianDietRules.ProhibitedNonVegetarianGroups.Concat(VegetarianDietRules.SupportedIngredientGroups.Except(VegetarianDietRules.GetAllowedGroups(x.Name))).ToArray(),
+                catalog.Where(option => compatibleNames.Contains(option.Name, StringComparer.OrdinalIgnoreCase)).Select(option => option.DietTypeId).ToArray());
+        }).ToList();
+    }
     public async Task<IReadOnlyCollection<CatalogItemResponse>> GetAllergensAsync(CancellationToken cancellationToken = default) =>
         await allergens.Query().OrderBy(x => x.Name).Select(x => new CatalogItemResponse(x.AllergenId, x.Name, null)).ToListAsync(cancellationToken);
     public async Task<CatalogItemResponse> CreateAllergenAsync(AllergenRequest request, CancellationToken cancellationToken = default)
@@ -94,13 +101,17 @@ public class ReferenceDataAndRestaurantService(
             }
             allergenIds = await db.UserAllergens.AsNoTracking().Where(x => x.UserId == userId.Value).Select(x => x.AllergenId).ToArrayAsync(cancellationToken);
         }
-        if (dietTypeId.HasValue && !await dietTypes.Query().AnyAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken))
-            throw new ServiceException("Diet type was not found.", 404);
+        // Saved profile is authoritative. Without one, apply the same compatibility
+        // rules to the selected diet instead of requiring identical restaurant tags.
+        if (dietTypeId.HasValue && userAllowedGroups is null)
+        {
+            var selectedDiet = await dietTypes.Query().AsNoTracking().SingleOrDefaultAsync(x => x.DietTypeId == dietTypeId.Value, cancellationToken)
+                ?? throw new ServiceException("Diet type was not found.", 404);
+            userAllowedGroups = VegetarianDietRules.GetAllowedGroups(selectedDiet.Name).ToArray();
+        }
         var query = restaurants.Query().Include(x => x.Foods).Include(x => x.DietTypes).ThenInclude(x => x.DietType)
             .Include(x => x.Ingredients).ThenInclude(x => x.Ingredient).ThenInclude(x => x.Category)
             .Where(x => x.Latitude.HasValue && x.Longitude.HasValue);
-        if (dietTypeId.HasValue && userAllowedGroups is null)
-            query = query.Where(x => x.DietTypes.Any(item => item.DietTypeId == dietTypeId.Value));
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var term = keyword.Trim().ToLower();
@@ -110,7 +121,7 @@ public class ReferenceDataAndRestaurantService(
         }
         var candidates = await query.ToListAsync(cancellationToken);
         return candidates
-            .Where(x => userAllowedGroups is null || x.DietTypes.Any(d => VegetarianDietRules.GetAllowedGroups(d.DietType.Name).All(userAllowedGroups.Contains)))
+            .Where(x => userAllowedGroups is null || VegetarianDietRules.HasCompatibleRestaurantOption(x.DietTypes.Select(d => d.DietType.Name), userAllowedGroups))
             .Where(x => allergenIds.Length == 0 || !x.Ingredients.Any(i => i.Ingredient.AllergenId.HasValue && allergenIds.Contains(i.Ingredient.AllergenId.Value)))
             .Where(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value) <= radiusKm)
             .OrderBy(x => DistanceKm(latitude, longitude, x.Latitude!.Value, x.Longitude!.Value)).Select(ToRestaurant).ToList();
@@ -184,8 +195,11 @@ public class ReferenceDataAndRestaurantService(
     {
         var unique = (ids ?? []).Distinct().ToArray();
         if (unique.Length == 0) throw new ServiceException("Select at least one restaurant diet type.", 400);
-        if (await dietTypes.Query().CountAsync(x => unique.Contains(x.DietTypeId), ct) != unique.Length)
+        var selected = await dietTypes.Query().AsNoTracking().Where(x => unique.Contains(x.DietTypeId)).ToListAsync(ct);
+        if (selected.Count != unique.Length)
             throw new ServiceException("Diet type was not found.", 404);
+        if (selected.Any(x => !VegetarianDietRules.IsSupportedDietType(x.Name)))
+            throw new ServiceException("Restaurant diet tags must use the supported profile and restaurant matching rules.", 400);
         return unique;
     }
     private async Task ReplaceDietTypesAsync(int restaurantId, int[] ids, CancellationToken ct)
