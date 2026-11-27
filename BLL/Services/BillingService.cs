@@ -90,7 +90,7 @@ public sealed class BillingService(
         var counter = await GetCounterAsync(userId, feature, plan, ct);
         var limit = feature == ChatFeature ? plan.ChatbotLimit : plan.AiPostLimit;
         if (counter.UsedCount >= limit)
-            throw new ServiceException($"{(feature == ChatFeature ? "Chatbot" : "AI post") } quota has been used. It refills at {counter.NextRefillAt:O}.", 429);
+            throw new ServiceException($"Bạn đã hết lượt {(feature == ChatFeature ? "chatbot" : "tạo bài bằng AI")}. Lượt sẽ được cấp lại lúc {counter.NextRefillAt:HH:mm dd/MM/yyyy}.", 429);
         counter.UsedCount++;
         await db.SaveChangesAsync(ct);
     }
@@ -252,7 +252,7 @@ public sealed class BillingService(
 
     private static SubscriptionPlanResponse ToResponse(SubscriptionPlan x) => new(x.SubscriptionPlanId, x.Code, x.Name, x.PriceVnd, x.ChatbotLimit, x.AiPostLimit, x.RefillIntervalHours, x.DurationDays, x.IsActive);
     private static AiUsageResponse ToUsage(SubscriptionPlan plan, AiUsageCounter chat, AiUsageCounter post, UserSubscription? active) =>
-        new(plan.Code, plan.Name, plan.Code != FreePlanCode, chat.UsedCount, plan.ChatbotLimit, post.UsedCount, plan.AiPostLimit, chat.NextRefillAt, active?.ExpiresAt);
+        new(plan.Code, plan.Name, plan.Code != FreePlanCode, chat.UsedCount, plan.ChatbotLimit, post.UsedCount, plan.AiPostLimit, chat.NextRefillAt, active?.ExpiresAt, post.NextRefillAt);
     private PaymentTransactionResponse ToPaymentResponse(PaymentTransaction x, SubscriptionPlan plan)
     {
         var content = Uri.EscapeDataString(x.TransactionCode);

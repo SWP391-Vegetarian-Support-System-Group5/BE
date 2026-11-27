@@ -92,7 +92,7 @@ public record SubscriptionPlanRequest([Required, MaxLength(40)] string Code, [Re
 public record SubscriptionPlanResponse(int SubscriptionPlanId, string Code, string Name, decimal PriceVnd, int ChatbotLimit,
     int AiPostLimit, int RefillIntervalHours, int DurationDays, bool IsActive);
 public record AiUsageResponse(string PlanCode, string PlanName, bool IsPremium, int ChatbotUsed, int ChatbotLimit,
-    int AiPostUsed, int AiPostLimit, DateTime NextRefillAt, DateTime? SubscriptionExpiresAt);
+    int AiPostUsed, int AiPostLimit, DateTime NextRefillAt, DateTime? SubscriptionExpiresAt, DateTime AiPostNextRefillAt);
 public record CreatePaymentRequest([Range(1, int.MaxValue)] int PlanId);
 public record PaymentTransactionResponse(long PaymentTransactionId, string TransactionCode, decimal AmountVnd, string Status,
     string QrUrl, DateTime ExpiresAt, int PlanId, string PlanName);
