@@ -59,20 +59,28 @@ public class RecipeService(
     {
         ValidateRecipeRequest(request);
         var imageUrl = ImageUrlValidation.Normalize(request.ImageUrl);
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
         await ValidateRelationsAsync(request, cancellationToken);
         // A resubmitted manual recipe goes back to the administrator, while AI recipes retain AI moderation.
         var requiresAdminReview = request.RequiresAdminReview && role != "ADMIN";
-        var moderationReason = role == "ADMIN" || requiresAdminReview ? null : await moderationAiService.FlagRecipeReasonAsync(ModerationText(request), request.AnimalDerivedIngredientsConfirmed, cancellationToken);
+        var pendingFlags = recipe.Post.ModerationFlags.Where(f => f.Source == "AI" && f.Status == "PENDING").ToList();
+        var sameContent = HasSameModerationContent(recipe, request);
+        var keepPendingReview = role != "ADMIN" && !requiresAdminReview && sameContent && pendingFlags.Count > 0;
+        var alreadyApproved = sameContent && recipe.Post.Status == "PUBLISHED"
+            && recipe.Post.ModerationFlags.Where(f => f.Source == "AI").OrderByDescending(f => f.FlagId)
+                .FirstOrDefault() is { Status: "APPROVED", ReviewedBy: not null };
+        var moderationReason = role == "ADMIN" || requiresAdminReview || keepPendingReview || alreadyApproved
+            ? null
+            : await moderationAiService.FlagRecipeReasonAsync(ModerationText(request), request.AnimalDerivedIngredientsConfirmed, cancellationToken);
         var wasPublished = recipe.Post.Status == "PUBLISHED";
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var videoUrl = request.VideoUrl?.Trim();
         recipe.Post.Title = request.Title.Trim(); recipe.Post.Content = request.Content.Trim(); recipe.Post.VideoUrl = videoUrl; recipe.Post.ThumbnailUrl = imageUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); recipe.Post.UpdatedAt = VietnamTime.Now;
-        recipe.Post.Status = requiresAdminReview ? "PENDING_REVIEW" : moderationReason is null ? "PUBLISHED" : "DRAFT";
-        var pendingFlags = await moderationFlags.Query().Where(f => f.PostId == id && f.Source == "AI" && f.Status == "PENDING").ToListAsync(cancellationToken);
-        foreach (var flag in pendingFlags) flag.Status = "APPROVED";
+        recipe.Post.Status = requiresAdminReview ? "PENDING_REVIEW" : moderationReason is not null || keepPendingReview ? "DRAFT" : "PUBLISHED";
+        if (!keepPendingReview)
+            foreach (var flag in pendingFlags) flag.Status = "RESUBMITTED";
         if (requiresAdminReview)
         {
             var rejectedFlags = await moderationFlags.Query().Where(f => f.PostId == id && f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED").ToListAsync(cancellationToken);
@@ -94,10 +102,12 @@ public class RecipeService(
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var recipe = await BaseQuery().SingleOrDefaultAsync(x => x.PostId == id, cancellationToken) ?? throw new ServiceException("Recipe was not found.", 404);
         EnsureOwner(recipe.Post.UserId, actorId, role);
         if (recipe.Post.Status == "REMOVED") return;
         recipe.Post.Status = "REMOVED"; recipe.Post.UpdatedAt = VietnamTime.Now; await recipes.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
         if (role == "ADMIN" && recipe.Post.UserId != actorId && notifications is not null)
             await notifications.CreateAsync(recipe.Post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", id, cancellationToken);
@@ -139,6 +149,15 @@ public class RecipeService(
     }
     private static RecipeResponse ToResponse(Recipe x, int? actorId = null) => new(x.PostId, x.Post.Title, x.Post.Content, x.Post.Status, x.VideoUrl ?? x.Post.VideoUrl, x.Post.ThumbnailUrl ?? MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(x.VideoUrl ?? x.Post.VideoUrl), x.PrepMinutes, x.CookMinutes, x.Servings, x.Ingredients.OrderBy(i => i.RecipeIngredientId).Select(i => new IngredientRequest(i.Ingredient.Name, i.Amount, i.Ingredient.Category.DietaryGroup, i.Ingredient.AllergenId, i.Ingredient.IngredientCategoryId, i.Ingredient.IngredientId)).ToList(), x.Steps.OrderBy(s => s.StepNumber).Select(s => new RecipeStepRequest(s.StepNumber, s.Instruction)).ToList(), x.DietCompatibilities.Where(d => d.IsCompatible).Select(d => d.DietTypeId).ToList(), x.RecipeName, x.CategoryMappings.Where(m => m.Category.IsActive).Select(m => RecipeCategoryService.ToResponse(m.Category)).ToList(), actorId == x.Post.UserId ? x.Post.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null, x.ImageUrl, x.CaloriesPerServing, x.Post.Ratings.Count == 0 ? 0 : x.Post.Ratings.Average(r => r.Rating), x.Post.Ratings.Count, x.Ingredients.Where(i => !i.Ingredient.IsAllergenProfileVerified).Select(i => i.Ingredient.Name).Distinct().ToArray());
     private static string ModerationText(CreateRecipeRequest request) => $"Tiêu đề: {request.Title}\nTên món: {request.RecipeName}\nNội dung: {request.Content}\nNguyên liệu: {string.Join(", ", (request.Ingredients ?? []).Select(x => x.IngredientName))}\nCác bước: {string.Join("; ", (request.Steps ?? []).Select(x => x.Instruction))}";
+    private static bool HasSameModerationContent(Recipe recipe, CreateRecipeRequest request) =>
+        recipe.Post.Title == request.Title.Trim()
+        && recipe.Post.Content == request.Content.Trim()
+        && recipe.RecipeName == request.RecipeName.Trim()
+        && recipe.Ingredients.OrderBy(x => x.RecipeIngredientId)
+            .Select(x => (x.Ingredient.Name, x.Ingredient.Category.DietaryGroup))
+            .SequenceEqual((request.Ingredients ?? []).Select(x => (x.IngredientName.Trim(), x.DietaryGroup.Trim().ToUpperInvariant())))
+        && recipe.Steps.OrderBy(x => x.StepNumber).Select(x => (x.StepNumber, x.Instruction))
+            .SequenceEqual((request.Steps ?? []).OrderBy(x => x.StepNumber).Select(x => (x.StepNumber, x.Instruction.Trim())));
     private static PostResponse ToPostResponse(Post x, int? actorId = null) => new(
         x.PostId,
         x.UserId,

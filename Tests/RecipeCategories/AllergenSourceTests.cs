@@ -39,7 +39,7 @@ static class AllergenSourceTests
         var rice = Ingredient(6, "Gạo", 1, true);
         var chickpeaTofu = Ingredient(7, "Đậu hũ đậu gà - product E", 1, true);
         var coconutYogurt = Ingredient(8, "Sữa chua dừa - product F", 1, true);
-        var unknown = Ingredient(9, "Đậu hũ chưa rõ nguồn gốc", 1, false);
+        var unknown = Ingredient(9, "Tàu hũ chưa rõ nguồn gốc", 1, false);
         void Recipe(int id, string name, Ingredient ingredient, string type = "RECIPE", string status = "PUBLISHED")
         {
             var recipe = new Recipe { PostId = id, RecipeName = name, CaloriesPerServing = 700,
@@ -53,7 +53,7 @@ static class AllergenSourceTests
         Recipe(1, "Món đậu nành", soy); Recipe(2, "Đậu phụ kho", tofu); Recipe(3, "Sinh tố sữa đậu nành", soyMilk);
         Recipe(4, "Sữa chua trái cây", yogurt); Recipe(5, "Sốt nhiều dị ứng", multi); Recipe(6, "Cơm", rice);
         Recipe(7, "Đậu hũ đậu gà", chickpeaTofu); Recipe(8, "Sữa chua thực vật", coconutYogurt);
-        Recipe(9, "Chưa xác minh", unknown); Recipe(10, "Video nấu đậu phụ", tofu, "VIDEO"); Recipe(11, "Bản nháp cơm", rice, status: "DRAFT");
+        Recipe(9, "Video nấu tàu hũ chưa xác minh", unknown, "VIDEO"); Recipe(10, "Video nấu đậu phụ", tofu, "VIDEO"); Recipe(11, "Bản nháp cơm", rice, status: "DRAFT");
         await db.SaveChangesAsync();
         var events = new Events(); var catalog = new IngredientCatalogService(db, events);
         var selection = new UserAllergenService(new Repository<UserAllergen>(db), new Repository<Allergen>(db), new Repository<User>(db));
@@ -65,7 +65,7 @@ static class AllergenSourceTests
         Check((await selection.GetAsync(1)).Allergens.Count == 1, "duplicate IDs are removed and persisted response is returned");
         var result = await Search();
         Check(!result.Any(x => new[] { 1, 2, 3, 5, 10 }.Contains(x.PostId)), "soy excludes soy-derived tofu, soy milk and multi-allergen recipes");
-        Check(result.Any(x => x.PostId == 9 && x.UnverifiedIngredientNames!.Contains(unknown.Name)), "unverified unmatched recipe remains visible with verification metadata");
+        Check(result.All(x => x.PostId != 9), "unverified tàu hũ is excluded without an allergen link");
         Check(result.Any(x => x.PostId == 7) && result.Any(x => x.PostId == 8), "chickpea tofu and plant yogurt are not guessed to contain soy/milk");
         Check((await Search(keyword: "Đậu phụ kho")).Count == 0, "exact excluded dish name cannot bypass filtering");
         Check((await Search(category: 1)).Select(x => x.PostId).Order().SequenceEqual(result.Select(x => x.PostId).Order()), "categories use the same rules");
@@ -140,9 +140,9 @@ static class AllergenSourceTests
         await selection.UpdateAsync(1, new([]));
         var baseline = (await Search()).Select(x => x.PostId).ToHashSet();
         foreach (var (ids, excluded) in new[] {
-            (new[] { 1 }, new[] { 1,2,3,5,10 }),
-            (new[] { 1,2 }, new[] { 1,2,3,4,5,8,10 }),
-            (new[] { 2 }, new[] { 3,4,8 }),
+            (new[] { 1 }, new[] { 1,2,3,5,7,9,10 }),
+            (new[] { 1,2 }, new[] { 1,2,3,4,5,7,8,9,10,created.PostId }),
+            (new[] { 2 }, new[] { 3,4,8,created.PostId }),
             (Array.Empty<int>(), Array.Empty<int>()) })
         {
             await selection.UpdateAsync(1, new(ids.ToList()));
@@ -157,12 +157,13 @@ static class AllergenSourceTests
                 "matcher uses recorded relations even when all profiles are unverified");
         }
         await selection.UpdateAsync(1, new([1]));
-        var unverifiedOptions = await planner.GetReplacementOptionsAsync(plan.MealPlanId, meal.MealPlanMealId, 1, null);
-        Check(unverifiedOptions.Any(x => x.RecipeId == 6) && unverifiedOptions.All(x => !new[] {1,2,3,5,10}.Contains(x.RecipeId)),
-            "planner replacement keeps unmatched unverified ingredients and rejects matches");
         var unverifiedPlan = await planner.RegenerateAsync(plan.MealPlanId, 1, new(null, null, "MAINTAIN"));
-        Check(unverifiedPlan.Meals.Count == 21 && unverifiedPlan.Meals.All(x => !new[] {1,2,3,5,10}.Contains(x.RecipeId)),
+        int[] soyMatches = [1, 2, 3, 5, 7, 9, 10];
+        Check(unverifiedPlan.Meals.Count == 21 && unverifiedPlan.Meals.All(x => !soyMatches.Contains(x.RecipeId)),
             "planner still generates a complete plan with an unverified catalog using recorded allergies");
+        var unverifiedOptions = await planner.GetReplacementOptionsAsync(unverifiedPlan.MealPlanId, unverifiedPlan.Meals.First().MealPlanMealId, 1, null);
+        Check(unverifiedOptions.Any(x => x.RecipeId == 6) && unverifiedOptions.All(x => !soyMatches.Contains(x.RecipeId)),
+            "planner replacement keeps unmatched unverified ingredients and rejects matches");
         plan = unverifiedPlan; // Regeneration replaces the persisted plan and returns its new ID.
         await Reject(() => planner.ReplaceMealAsync(plan.MealPlanId, unverifiedPlan.Meals.First().MealPlanMealId, 1, 2),
             "unverified matching tofu cannot bypass explicit replacement");

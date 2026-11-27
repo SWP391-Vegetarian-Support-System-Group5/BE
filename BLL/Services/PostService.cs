@@ -36,16 +36,25 @@ public class PostService(
         var query = BaseQuery();
         if (!isAdmin) query = query.Where(x => x.Status == "PUBLISHED");
         else if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status.Trim().ToUpperInvariant());
+        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
+        if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
+        if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
+        if (sort is not null && sort != "rating" && sort != "latest") throw new ServiceException("sort must be rating or latest.", 400);
         if (!isAdmin)
         {
             var filter = await PersonalRecipeFilter.LoadAsync(db, actorId, cancellationToken);
             var eligibleIds = filter.Apply(db.Recipes).Select(x => x.PostId);
             query = query.Where(x => x.Recipe == null ? x.PostType != "RECIPE" : eligibleIds.Contains(x.Recipe.PostId));
+            if (filter.AllergenNames.Length > 0)
+            {
+                var titles = await query.Where(x => x.Recipe == null)
+                    .Select(x => new { x.PostId, x.Title }).ToListAsync(cancellationToken);
+                var excludedIds = titles.Where(x => filter.AllergenNames.Any(name => IngredientAllergyMatch.NameMatches(x.Title, name)))
+                    .Select(x => x.PostId).ToArray();
+                if (excludedIds.Length > 0)
+                    query = query.Where(x => x.Recipe != null || !excludedIds.Contains(x.PostId));
+            }
         }
-        if (!string.IsNullOrWhiteSpace(keyword)) { var term = keyword.Trim().ToLower(); query = query.Where(x => x.Title.ToLower().Contains(term) || (x.Recipe != null && x.Recipe.RecipeName.ToLower().Contains(term)) || x.Content.ToLower().Contains(term)); }
-        if (categoryId.HasValue) query = query.Where(x => x.Recipe != null && x.Recipe.CategoryMappings.Any(m => m.CategoryId == categoryId && m.Category.IsActive));
-        if (!string.IsNullOrWhiteSpace(postType)) query = query.Where(x => x.PostType == postType.Trim().ToUpperInvariant());
-        if (sort is not null && sort != "rating" && sort != "latest") throw new ServiceException("sort must be rating or latest.", 400);
         query = sort == "rating"
             ? query.OrderByDescending(x => x.Ratings.Count == 0 ? 0 : x.Ratings.Average(r => r.Rating)).ThenByDescending(x => x.Ratings.Count).ThenByDescending(x => x.PostId)
             : query.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.PostId);
@@ -69,10 +78,10 @@ public class PostService(
 
     public async Task UpdateAsync(int id, int actorId, string role, UpdatePostRequest request, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         if (post.Status == "REMOVED") throw new ServiceException("Bài đã bị gỡ không thể đăng lại.", 409);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var wasPublished = post.Status == "PUBLISHED";
         var videoUrl = request.VideoUrl?.Trim();
         post.Title = request.Title.Trim(); post.Content = request.Content.Trim(); post.PostType = FixedValues.PostType(request.PostType); post.VideoUrl = videoUrl; post.ThumbnailUrl = MediaUrlHelpers.BuildCloudinaryVideoThumbnailUrl(videoUrl); post.UpdatedAt = VietnamTime.Now;
@@ -86,6 +95,7 @@ public class PostService(
 
     public async Task ReviewManualPostAsync(int id, int adminId, bool approve, string? rejectionReason, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         if (post.Status != "PENDING_REVIEW") throw new ServiceException("Only posts pending review can be reviewed.", 409);
         if (!approve && string.IsNullOrWhiteSpace(rejectionReason)) throw new ServiceException("A rejection reason is required.", 400);
@@ -94,6 +104,7 @@ public class PostService(
         if (!approve)
             await moderationFlags.AddAsync(new ModerationFlag { PostId = id, Source = "ADMIN_REVIEW", Reason = rejectionReason!.Trim(), Status = "REJECTED", ReviewedBy = adminId }, cancellationToken);
         await posts.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         if (approve)
         {
             await communityEvents.PublishAsync(new CommunityEvent("postCreated", id, Post: await GetByIdAsync(id, adminId, "ADMIN", cancellationToken)), cancellationToken);
@@ -104,10 +115,12 @@ public class PostService(
 
     public async Task DeleteAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, id, null, cancellationToken);
         var post = await posts.FindAsync(id) ?? throw new ServiceException("Post was not found.", 404);
         EnsureOwner(post.UserId, actorId, role);
         if (post.Status == "REMOVED") return;
         post.Status = "REMOVED"; post.UpdatedAt = VietnamTime.Now; await posts.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent("postRemoved", id), cancellationToken);
         if (role == "ADMIN" && post.UserId != actorId) await notifications.CreateAsync(post.UserId, "POST_REMOVED", "Bài viết của bạn đã bị quản trị viên gỡ.", id, cancellationToken);
     }
@@ -118,11 +131,21 @@ public class PostService(
         if (!postOwnerId.HasValue) throw new ServiceException("Post was not found.", 404);
         if (parentCommentId.HasValue && !await comments.Query().AnyAsync(x => x.CommentId == parentCommentId && x.PostId == postId && x.Status == "PUBLISHED", cancellationToken)) throw new ServiceException("Parent comment was not found.", 404);
         var now = VietnamTime.Now;
-        var comment = new Comment { PostId = postId, UserId = userId, ParentCommentId = parentCommentId, Content = request.Content.Trim(), Status = "PUBLISHED", CreatedAt = now, UpdatedAt = now };
-        await comments.AddAsync(comment, cancellationToken); await comments.SaveChangesAsync(cancellationToken);
-        await CreateAiCommentFlagAsync(comment.CommentId, comment.Content, cancellationToken);
+        var content = request.Content.Trim();
+        var reason = await moderationAiService.FlagReasonAsync(content, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var comment = new Comment { PostId = postId, UserId = userId, ParentCommentId = parentCommentId, Content = content, Status = reason is null ? "PUBLISHED" : "PENDING_REVIEW", CreatedAt = now, UpdatedAt = now };
+        await comments.AddAsync(comment, cancellationToken);
+        await comments.SaveChangesAsync(cancellationToken);
+        if (reason is not null)
+        {
+            await moderationFlags.AddAsync(new ModerationFlag { CommentId = comment.CommentId, Source = "AI", Reason = reason, Status = "PENDING" }, cancellationToken);
+            await moderationFlags.SaveChangesAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
         var created = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).SingleAsync(x => x.CommentId == comment.CommentId, cancellationToken);
         var response = ToCommentResponse(created, []);
+        if (reason is not null) return response;
         await communityEvents.PublishAsync(new CommunityEvent("commentCreated", postId, Comment: response, CommentCount: await CountPublishedCommentsAsync(postId, cancellationToken)), cancellationToken);
         if (postOwnerId != userId) await notifications.CreateAsync(postOwnerId.Value, "POST_COMMENTED", "Có bình luận mới về bài viết của bạn.", postId, cancellationToken);
         return response;
@@ -137,8 +160,11 @@ public class PostService(
     public async Task<IReadOnlyCollection<CommentResponse>> GetCommentsAsync(int postId, CancellationToken cancellationToken = default)
     {
         if (!await posts.Query().AnyAsync(x => x.PostId == postId && x.Status == "PUBLISHED", cancellationToken)) throw new ServiceException("Post was not found.", 404);
-        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile).Where(x => x.PostId == postId && x.Status == "PUBLISHED").OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
-        return items.Where(x => x.ParentCommentId is null).Select(x => ToCommentTree(x, items)).ToList();
+        var items = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
+            .Where(x => x.PostId == postId && (x.Status == "PUBLISHED" || x.Status == "REMOVED"))
+            .OrderBy(x => x.CommentId).ToListAsync(cancellationToken);
+        var byParent = items.ToLookup(x => x.ParentCommentId);
+        return byParent[null].Select(x => ToCommentTree(x, byParent)).OfType<CommentResponse>().ToList();
     }
 
     public async Task<IReadOnlyCollection<CommentResponse>> GetAllCommentsAsync(CancellationToken cancellationToken = default)
@@ -151,29 +177,35 @@ public class PostService(
     {
         var comment = await comments.FindAsync(id) ?? throw new ServiceException("Comment was not found.", 404);
         EnsureOwner(comment.UserId, actorId, role); comment.Content = request.Content.Trim(); comment.UpdatedAt = VietnamTime.Now; await comments.SaveChangesAsync(cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("commentUpdated", comment.PostId, Comment: await GetCommentResponseAsync(id, cancellationToken), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
+        if (comment.Status == "PUBLISHED")
+            await communityEvents.PublishAsync(new CommunityEvent("commentUpdated", comment.PostId, Comment: await GetCommentResponseAsync(id, cancellationToken), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
     }
 
     public async Task DeleteCommentAsync(int id, int actorId, string role, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, null, id, cancellationToken);
         var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
             .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
         EnsureOwner(comment.UserId, actorId, role);
         if (comment.Status == "REMOVED") return;
         comment.Status = "REMOVED"; comment.UpdatedAt = VietnamTime.Now; await comments.SaveChangesAsync(cancellationToken);
-        await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        await communityEvents.PublishAsync(new CommunityEvent("commentRemoved", comment.PostId, Comment: ToRemovedCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
         if (role == "ADMIN" && comment.UserId != actorId) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên gỡ.", comment.PostId, cancellationToken);
     }
 
     public async Task SetCommentVisibilityAsync(int id, bool hidden, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await ContentWriteLock.AcquireAsync(db, null, id, cancellationToken);
         var comment = await comments.Query().Include(x => x.User).ThenInclude(x => x.Profile)
             .SingleOrDefaultAsync(x => x.CommentId == id, cancellationToken) ?? throw new ServiceException("Comment was not found.", 404);
         if (comment.Status == "REMOVED") throw new ServiceException("Removed comments cannot change visibility.", 409);
+        if (comment.Status == "PENDING_REVIEW") throw new ServiceException("Review the moderation flag before changing comment visibility.", 409);
         if ((comment.Status == "HIDDEN") == hidden) return;
         comment.Status = hidden ? "HIDDEN" : "PUBLISHED";
         comment.UpdatedAt = VietnamTime.Now;
         await comments.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         await communityEvents.PublishAsync(new CommunityEvent(hidden ? "commentRemoved" : "commentUpdated", comment.PostId,
             Comment: ToCommentResponse(comment, []), CommentCount: await CountPublishedCommentsAsync(comment.PostId, cancellationToken)), cancellationToken);
         if (hidden) await notifications.CreateAsync(comment.UserId, "COMMENT_REMOVED", "Bình luận của bạn đã bị quản trị viên ẩn.", comment.PostId, cancellationToken);
@@ -244,8 +276,17 @@ public class PostService(
         actorId == x.UserId ? x.ModerationFlags.Where(f => (f.Source == "AI" && f.Status == "PENDING") || (f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED")).OrderByDescending(f => f.FlagId).FirstOrDefault()?.Reason : null,
         x.Recipe?.ImageUrl,
         x.Recipe?.CaloriesPerServing);
-    private static CommentResponse ToCommentTree(Comment comment, IReadOnlyCollection<Comment> all) => ToCommentResponse(comment, all.Where(x => x.ParentCommentId == comment.CommentId).Select(x => ToCommentTree(x, all)).ToList());
-    private static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies, x.CreatedAt, x.UpdatedAt);
+    private static CommentResponse? ToCommentTree(Comment comment, ILookup<int?, Comment> byParent)
+    {
+        var replies = byParent[comment.CommentId].Select(x => ToCommentTree(x, byParent)).OfType<CommentResponse>().ToList();
+        if (comment.Status != "REMOVED") return ToCommentResponse(comment, replies);
+        if (replies.Count == 0) return null;
+        return ToRemovedCommentResponse(comment, replies);
+    }
+    private static CommentResponse ToRemovedCommentResponse(Comment comment, IReadOnlyCollection<CommentResponse> replies) =>
+        new(comment.CommentId, comment.PostId, 0, string.Empty, comment.ParentCommentId,
+            string.Empty, comment.Status, replies, comment.CreatedAt, comment.UpdatedAt);
+    internal static CommentResponse ToCommentResponse(Comment x, IReadOnlyCollection<CommentResponse> replies) => new(x.CommentId, x.PostId, x.UserId, x.User.Profile?.FullName ?? "Unknown user", x.ParentCommentId, x.Content, x.Status, replies, x.CreatedAt, x.UpdatedAt);
     private async Task<int> CountPublishedCommentsAsync(int postId, CancellationToken ct) => await comments.Query().CountAsync(x => x.PostId == postId && x.Status == "PUBLISHED", ct);
     private async Task<CommentResponse> GetCommentResponseAsync(int id, CancellationToken ct)
     {
@@ -269,12 +310,5 @@ public class PostService(
     {
         var rejected = await moderationFlags.Query().Where(f => f.PostId == postId && f.Source == "ADMIN_REVIEW" && f.Status == "REJECTED").ToListAsync(ct);
         foreach (var flag in rejected) flag.Status = "RESUBMITTED";
-    }
-    private async Task CreateAiCommentFlagAsync(int commentId, string content, CancellationToken ct)
-    {
-        var reason = await moderationAiService.FlagReasonAsync(content, ct);
-        if (reason is null) return;
-        await moderationFlags.AddAsync(new ModerationFlag { CommentId = commentId, Source = "AI", Reason = reason, Status = "PENDING" }, ct);
-        await moderationFlags.SaveChangesAsync(ct);
     }
 }
