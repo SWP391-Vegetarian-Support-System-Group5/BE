@@ -42,8 +42,16 @@ public class BillingController(IBillingService billing, SePaySettings sePaySetti
     {
         if (!IsAuthorizedWebhook(webhookApiKey)) return Unauthorized();
         var result = await billing.HandleSePayWebhookAsync(request, ct);
-        // Legacy direct-bank webhooks in SePay treat 201 as their success response.
-        return StatusCode(StatusCodes.Status201Created, result);
+        // SePay expects both HTTP 201 and a JSON success field. An unmatched
+        // transfer is not a successful activation and needs reconciliation.
+        return StatusCode(StatusCodes.Status201Created, new
+        {
+            success = result.Matched,
+            result.Matched,
+            result.Activated,
+            result.PaymentTransactionId,
+            result.Message
+        });
     }
 
     private bool IsAuthorizedWebhook(string? webhookApiKey)
