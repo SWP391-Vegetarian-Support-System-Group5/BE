@@ -3,6 +3,7 @@ using BLL.DTOs;
 using DAL.Data;
 using DAL.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace BLL.Services;
 
@@ -31,7 +32,8 @@ public interface IBillingService
 public sealed class BillingService(
     VegetarianDbContext db,
     SePaySettings sePaySettings,
-    IUserNotificationService notifications) : IBillingService
+    IUserNotificationService notifications,
+    ILogger<BillingService>? logger = null) : IBillingService
 {
     private const string FreePlanCode = "FREE";
     public const string ChatFeature = "CHATBOT";
@@ -159,6 +161,10 @@ public sealed class BillingService(
     public async Task<SePayWebhookResponse> HandleSePayWebhookAsync(SePayWebhookRequest request, CancellationToken ct = default)
     {
         if (request.TransferAmount is not > 0) throw new ServiceException("Payment webhook does not contain a valid amount.", 400);
+        if (!string.Equals(request.TransferType?.Trim(), "in", StringComparison.OrdinalIgnoreCase))
+            throw new ServiceException("Payment webhook must describe an incoming transfer.", 400);
+        if (string.IsNullOrWhiteSpace(sePaySettings.AccountNumber) || !string.Equals(request.AccountNumber?.Trim(), sePaySettings.AccountNumber.Trim(), StringComparison.Ordinal))
+            throw new ServiceException("Payment webhook account does not match the configured receiving account.", 400);
         var lookup = string.Join(" ", request.Code, request.Content, request.Description).Trim();
         if (string.IsNullOrWhiteSpace(lookup)) throw new ServiceException("Payment webhook does not contain an order code.", 400);
         // Match the SePay transfer text in memory. Provider messages contain a
@@ -169,21 +175,45 @@ public sealed class BillingService(
         // still authoritative, so accept a late callback once instead of
         // leaving a paid customer on the Free plan.
         var candidates = await db.PaymentTransactions.Include(x => x.Plan)
-            .Where(x => x.Status == "PENDING" || x.Status == "EXPIRED")
+            .Where(x => x.Status == "PENDING" || x.Status == "EXPIRED" || x.Status == "PAID")
             .OrderByDescending(x => x.PaymentTransactionId).ToListAsync(ct);
         var normalizedLookup = NormalizeTransactionCode(lookup);
         var payment = candidates.FirstOrDefault(x => normalizedLookup.Contains(NormalizeTransactionCode(x.TransactionCode), StringComparison.Ordinal));
         if (payment is null)
+        {
+            logger?.LogWarning("SePay transaction {TransactionId} did not match a payment order.", request.Id);
             return new(false, false, null, "No pending payment matches the transfer content.");
+        }
         if (request.TransferAmount.Value < payment.AmountVnd)
             throw new ServiceException("Payment amount is lower than the order amount.", 400);
         if (payment.Status == "PAID")
+        {
+            var incomingProviderId = string.IsNullOrWhiteSpace(request.ReferenceCode) ? request.Id?.ToString() : request.ReferenceCode.Trim();
+            if (!string.IsNullOrWhiteSpace(incomingProviderId) && !string.Equals(payment.ProviderTransactionId, incomingProviderId, StringComparison.Ordinal))
+            {
+                logger?.LogWarning("SePay transaction {TransactionId} reused already paid order {PaymentId}; manual reconciliation is required.", request.Id, payment.PaymentTransactionId);
+                return new(true, false, payment.PaymentTransactionId, "This order is already paid; a different transfer requires manual reconciliation.");
+            }
+            logger?.LogInformation("SePay transaction {TransactionId} matched already paid order {PaymentId}.", request.Id, payment.PaymentTransactionId);
             return new(true, false, payment.PaymentTransactionId, "Payment was already activated.");
+        }
         var now = VietnamTime.Now;
-        payment.Status = "PAID";
-        payment.PaidAt = now;
-        payment.ProviderTransactionId = request.ReferenceCode ?? request.Id?.ToString();
-        payment.ProviderPayload = System.Text.Json.JsonSerializer.Serialize(request);
+        var providerId = string.IsNullOrWhiteSpace(request.ReferenceCode) ? request.Id?.ToString() : request.ReferenceCode.Trim();
+        if (string.IsNullOrWhiteSpace(providerId)) throw new ServiceException("Payment webhook does not contain a transaction identifier.", 400);
+        var providerPayload = System.Text.Json.JsonSerializer.Serialize(request);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var claimed = await db.PaymentTransactions
+            .Where(x => x.PaymentTransactionId == payment.PaymentTransactionId && (x.Status == "PENDING" || x.Status == "EXPIRED"))
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "PAID")
+                .SetProperty(x => x.PaidAt, now)
+                .SetProperty(x => x.ProviderTransactionId, providerId)
+                .SetProperty(x => x.ProviderPayload, providerPayload), ct);
+        if (claimed == 0)
+        {
+            await transaction.RollbackAsync(ct);
+            logger?.LogInformation("SePay order {PaymentId} was already processed by another request.", payment.PaymentTransactionId);
+            return new(true, false, payment.PaymentTransactionId, "Payment was already activated.");
+        }
         var active = await GetActiveSubscriptionAsync(payment.UserId, ct);
         if (active is not null) active.Status = "EXPIRED";
         db.UserSubscriptions.Add(new UserSubscription
@@ -194,6 +224,8 @@ public sealed class BillingService(
         var counters = await db.AiUsageCounters.Where(x => x.UserId == payment.UserId).ToListAsync(ct);
         foreach (var counter in counters) ResetCounter(counter, payment.Plan, now);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        logger?.LogInformation("SePay transaction {TransactionId} activated payment order {PaymentId}.", request.Id, payment.PaymentTransactionId);
         await notifications.CreateAsync(
             payment.UserId,
             "PAYMENT_SUCCESS",
